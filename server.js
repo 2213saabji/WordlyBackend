@@ -13,7 +13,12 @@ const app = express();
 const PORT = process.env.PORT || 8888;
 
 // Middleware
-app.use(cors());
+const corsOptions = {
+  origin: '*',
+};
+
+// Apply CORS to every route, including preflight requests.
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Connect to MongoDB
