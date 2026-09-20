@@ -13,8 +13,13 @@ const app = express();
 const PORT = process.env.PORT || 8888;
 
 // Middleware
+const allowedOrigins = [
+  '*',
+  'https://37d19d9b-3001.uks1.devtunnels.ms',
+];
+
 const corsOptions = {
-  origin: '*',
+  origin: allowedOrigins,
 };
 
 // Apply CORS to every route, including preflight requests.
