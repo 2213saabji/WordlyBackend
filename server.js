@@ -18,7 +18,7 @@ const allowedOrigins = [
   'http://127.0.0.1:3001',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
-  'https://37d19d9b-3001.uks1.devtunnels.ms',
+  'https://wordly-frontend-steel.vercel.app',
 ];
 
 const corsOptions = {
