@@ -30,7 +30,9 @@ async function registrationOptions(req, res) {
     return res.status(404).json({ message: 'User not found' });
   }
 
-  const existing = await WebAuthnCredential.find({ user: user._id, revokedAt: null });
+  const existing = await WebAuthnCredential.find({ user: user._id, revokedAt: null })
+    .select('credentialID transports')
+    .lean();
 
   const options = await generateRegistrationOptions({
     rpName: RP_NAME,
@@ -170,9 +172,13 @@ async function authenticationVerify(req, res) {
 
   cred.counter = verification.authenticationInfo.newCounter;
   cred.lastUsedAt = new Date();
-  await cred.save();
 
-  const user = await User.findById(cred.user);
+  // cred.user is already known — the counter/lastUsedAt save doesn't need to
+  // finish before fetching the user, so run both round trips concurrently.
+  const [, user] = await Promise.all([
+    cred.save(),
+    User.findById(cred.user).select('-passwordHash -resetPasswordTokenHash -resetPasswordExpires'),
+  ]);
   if (!user) {
     return res.status(401).json({ message: 'Passkey not recognized or has been revoked' });
   }
@@ -190,7 +196,8 @@ async function authenticationVerify(req, res) {
 async function listDevices(req, res) {
   const creds = await WebAuthnCredential.find({ user: req.userId, revokedAt: null })
     .select('deviceId deviceType backedUp createdAt lastUsedAt')
-    .sort({ lastUsedAt: -1 });
+    .sort({ lastUsedAt: -1 })
+    .lean();
   return res.json({ devices: creds });
 }
 

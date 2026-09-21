@@ -29,4 +29,9 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// resetPassword() queries on both fields together; every unrequested account
+// sits at the default null, so the index buckets those together and still
+// makes the actual token lookup an O(log n) point query instead of a scan.
+userSchema.index({ resetPasswordTokenHash: 1, resetPasswordExpires: 1 });
+
 module.exports = mongoose.model('User', userSchema);

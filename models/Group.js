@@ -10,4 +10,6 @@ const groupSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+groupSchema.index({ members: 1 }); // myGroups() / membership checks — multikey index over the array
+
 module.exports = mongoose.model('Group', groupSchema);

@@ -114,7 +114,8 @@ async function applyStatsForFinishedGame(userId, game) {
 }
 
 async function history(req, res) {
-  const games = await Game.find({ user: req.userId, mode: 'daily' }).sort({ date: -1 }).limit(30);
+  // Read-only response — .lean() skips hydrating full Mongoose documents.
+  const games = await Game.find({ user: req.userId, mode: 'daily' }).sort({ date: -1 }).limit(30).lean();
   return res.json({ games: games.map(serializeGame) });
 }
 
@@ -195,7 +196,7 @@ async function submitInfiniteGuess(req, res) {
 }
 
 async function infiniteHistory(req, res) {
-  const games = await Game.find({ user: req.userId, mode: 'infinite' }).sort({ createdAt: -1 }).limit(30);
+  const games = await Game.find({ user: req.userId, mode: 'infinite' }).sort({ createdAt: -1 }).limit(30).lean();
   return res.json({ games: games.map(serializeGame) });
 }
 
