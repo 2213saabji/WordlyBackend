@@ -3,6 +3,8 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
 
+const { connectDB } = require('./utils/db');
+
 const authRoutes = require('./routes/authRoutes');
 const gameRoutes = require('./routes/gameRoutes');
 const groupRoutes = require('./routes/groupRoutes');
@@ -39,14 +41,36 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('Connected to MongoDB successfully'))
-  .catch((err) => console.error('MongoDB connection error:', err));
-
 // Test Route
 app.get('/', (req, res) => {
   res.send('Backend server is running!');
+});
+
+// Surfaces the actual driver error (bad URI, auth failure, IP not allowlisted)
+// which otherwise only shows up in the Vercel logs.
+app.get('/health/db', async (req, res) => {
+  try {
+    await connectDB();
+    res.json({
+      ok: true,
+      readyState: mongoose.connection.readyState,
+      db: mongoose.connection.name,
+      host: mongoose.connection.host,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, name: err.name, message: err.message });
+  }
+});
+
+// Every API request waits for the connection before it can issue a query.
+app.use('/api', async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error('MongoDB connection error:', err);
+    res.status(503).json({ message: `Database unavailable: ${err.message}` });
+  }
 });
 
 // API Routes
@@ -71,3 +95,6 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });
+
+// Exported so a serverless host can use the app directly as a handler.
+module.exports = app;
