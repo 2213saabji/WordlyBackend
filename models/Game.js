@@ -36,5 +36,6 @@ gameSchema.index(
 );
 gameSchema.index({ mode: 1, date: 1, status: 1 }); // leaderboard date/week range queries
 gameSchema.index({ user: 1, mode: 1, status: 1 }); // "find my current in-progress infinite game"
+gameSchema.index({ user: 1, mode: 1, createdAt: -1 }); // infiniteHistory() sort — {user,mode,status} above doesn't cover the createdAt sort
 
 module.exports = mongoose.model('Game', gameSchema);

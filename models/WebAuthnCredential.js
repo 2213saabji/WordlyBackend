@@ -19,4 +19,8 @@ const webAuthnCredentialSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// "this user's active passkeys" — registrationOptions() (excludeCredentials),
+// listDevices(), and revoke() all filter on exactly these two fields.
+webAuthnCredentialSchema.index({ user: 1, revokedAt: 1 });
+
 module.exports = mongoose.model('WebAuthnCredential', webAuthnCredentialSchema);

@@ -9,6 +9,10 @@ const { sendPasswordResetEmail } = require('../utils/email');
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const RESET_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
+// Never needed once a doc leaves the DB layer — trims what publicUser() would
+// have to ignore off the wire on every read-only user fetch.
+const PUBLIC_USER_EXCLUDE = '-passwordHash -resetPasswordTokenHash -resetPasswordExpires';
+
 // Short-lived: once this expires, the client calls /refresh instead of
 // asking the user to log in again, as long as its device session is intact.
 function signToken(userId) {
@@ -53,7 +57,9 @@ async function signup(req, res) {
     return res.status(400).json({ message: 'Password must be at least 8 characters long' });
   }
 
-  const existing = await User.findOne({ email: email.toLowerCase() });
+  // .exists() returns just { _id } off the email index — no need to pull the
+  // whole document (passwordHash included) just to check for a duplicate.
+  const existing = await User.exists({ email: email.toLowerCase() });
   if (existing) {
     return res.status(409).json({ message: 'An account with this email already exists' });
   }
@@ -98,21 +104,20 @@ async function refresh(req, res) {
     return res.status(400).json({ message: 'deviceId is required' });
   }
 
-  const session = await DeviceSession.findOne({ deviceId, revokedAt: null });
-  if (!session) {
+  // Was 3 round trips (findOne session, findById user, save session) — this
+  // does the lookup, the lastUsedAt bump, and the user fetch in one.
+  const session = await DeviceSession.findOneAndUpdate(
+    { deviceId, revokedAt: null },
+    { lastUsedAt: new Date() },
+    { new: true }
+  ).populate({ path: 'user', select: PUBLIC_USER_EXCLUDE });
+
+  if (!session || !session.user) {
     return res.status(401).json({ message: 'Device session is invalid or has been logged out' });
   }
 
-  const user = await User.findById(session.user);
-  if (!user) {
-    return res.status(401).json({ message: 'Device session is invalid or has been logged out' });
-  }
-
-  session.lastUsedAt = new Date();
-  await session.save();
-
-  const token = signToken(user._id);
-  return res.json({ token, user: publicUser(user) });
+  const token = signToken(session.user._id);
+  return res.json({ token, user: publicUser(session.user) });
 }
 
 // Revokes this device's session so future /refresh calls for it fail and
@@ -137,7 +142,7 @@ async function logout(req, res) {
 }
 
 async function me(req, res) {
-  const user = await User.findById(req.userId);
+  const user = await User.findById(req.userId).select(PUBLIC_USER_EXCLUDE).lean();
   if (!user) {
     return res.status(404).json({ message: 'User not found' });
   }

@@ -19,7 +19,7 @@ async function createGroup(req, res) {
   let inviteCode;
   do {
     inviteCode = generateInviteCode();
-  } while (await Group.findOne({ inviteCode }));
+  } while (await Group.exists({ inviteCode })); // lighter than findOne — no document to materialize
 
   const group = await Group.create({
     name: name.trim(),
@@ -53,7 +53,9 @@ async function joinGroup(req, res) {
 }
 
 async function myGroups(req, res) {
-  const groups = await Group.find({ members: req.userId }).select('name inviteCode owner members createdAt');
+  const groups = await Group.find({ members: req.userId })
+    .select('name inviteCode owner members createdAt')
+    .lean();
   return res.json({ groups });
 }
 
@@ -73,10 +75,11 @@ async function leaveGroup(req, res) {
 
 async function leaderboard(req, res) {
   const { id } = req.params;
-  const group = await Group.findById(id).populate({
-    path: 'members',
-    select: 'username email stats',
-  });
+  // Read-only response: .lean() skips document hydration, and the populate
+  // select drops `email` (fetched before but never used in the mapping below).
+  const group = await Group.findById(id)
+    .populate({ path: 'members', select: 'username stats' })
+    .lean();
 
   if (!group) {
     return res.status(404).json({ message: 'Group not found' });
@@ -109,7 +112,7 @@ async function leaderboard(req, res) {
 
 async function dailyLeaderboard(req, res) {
   const { id } = req.params;
-  const group = await Group.findById(id).select('name members');
+  const group = await Group.findById(id).select('name members').lean();
   if (!group) {
     return res.status(404).json({ message: 'Group not found' });
   }
@@ -124,6 +127,9 @@ async function dailyLeaderboard(req, res) {
     mode: 'daily',
     status: { $in: ['won', 'lost'] },
   })
+    // Only these fields feed rankDailyEntries() — skips shipping `word` and
+    // every guess's timestamp over the wire for what can be a big result set.
+    .select('user status guesses.result timeTakenMs')
     .populate('user', 'username')
     .lean();
 
@@ -136,7 +142,7 @@ async function dailyLeaderboard(req, res) {
 
 async function weeklyLeaderboard(req, res) {
   const { id } = req.params;
-  const group = await Group.findById(id).select('name members');
+  const group = await Group.findById(id).select('name members').lean();
   if (!group) {
     return res.status(404).json({ message: 'Group not found' });
   }
@@ -152,6 +158,7 @@ async function weeklyLeaderboard(req, res) {
     mode: 'daily',
     status: { $in: ['won', 'lost'] },
   })
+    .select('user status guesses.result timeTakenMs')
     .populate('user', 'username')
     .lean();
 
