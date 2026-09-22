@@ -54,9 +54,21 @@ Errors: `400` missing fields / invalid email / password too short, `409` email a
 
 ### `POST /auth/login`
 ```json
-{ "email": "alice@example.com", "password": "..." }
+{ "email": "alice@example.com", "password": "...", "deviceId": "..." }
 ```
-Response `200`: same shape as signup (`token` + `user`). `401` on bad credentials.
+Response `200`: same shape as signup (`token` + `deviceId` + `user`). `401` on bad credentials — also returned (same generic message, to avoid revealing which accounts are Google-only) if the account was created via Google sign-in and has no password set.
+
+### `POST /auth/google`
+Signs the user in with a Google ID token instead of a password. Use this after the frontend runs Google Identity Services / Google Sign-In and receives a credential — send that credential here as `idToken`, don't try to validate it client-side.
+```json
+{ "idToken": "<Google ID token / credential from the frontend>", "deviceId": "..." }
+```
+Response `200`: same shape as `/auth/login` (`token` + `deviceId` + `user`).
+- First sign-in with a given Google account creates a new user (no password set — `passwordHash` stays unset until/unless the user later sets one, e.g. via forgot-password).
+- If the Google account's email already matches an existing email/password account, that account is linked (its `googleId` is set) instead of creating a duplicate — the user can then sign in with either method.
+- The backend verifies `idToken` against Google's servers (audience = `GOOGLE_CLIENT_ID` in `.env`) — it never trusts a bare email/name from the frontend.
+
+Errors: `400` missing `idToken`/`deviceId`; `401` invalid/expired/unverified-email Google credential; `500` if `GOOGLE_CLIENT_ID` isn't configured on the backend.
 
 ### `GET /auth/me`
 Auth required. Returns the current user's profile in the same `user` shape as above (includes live `stats` and `groups`). Use this to rehydrate session on app load.
@@ -96,12 +108,16 @@ Returns (or lazily creates) the caller's game for today.
     "guesses": [
       { "guess": "candy", "result": [1, 1, 0, 0, 1] },
       { "guess": "marry", "result": [0, 1, 1, 1, 1] }
-    ]
+    ],
+    "difficulty": "medium",
+    "hint": "Elegance of movement"
   }
 }
 ```
 - `status` is one of `"in-progress" | "won" | "lost"`.
 - `word` is **omitted** while `status` is `"in-progress"` (don't leak the answer) and included once the game is finished.
+- `difficulty` is `"easy" | "medium" | "hard"`, derived from the answer word — always present, safe to show even mid-game (doesn't leak the word).
+- `hint` is a short clue for the day's word (also safe to show mid-game). Same fields are present on every daily `game` object returned by `/game/today`, `/game/guess`, and `/game/history`.
 - `guesses[].result` is a per-letter array, index-aligned with the letters of `guess`. Each value is:
   - `1` → letter is correct **and** in the right position
   - `-1` → letter is in the word but in the **wrong** position
@@ -115,7 +131,7 @@ Response `200`:
 ```json
 {
   "result": [1, 1, 1, 1, 1],
-  "game": { "date": "2026-09-15", "status": "won", "attemptsUsed": 3, "attemptsRemaining": 3, "guesses": [...], "word": "carry" }
+  "game": { "date": "2026-09-15", "status": "won", "attemptsUsed": 3, "attemptsRemaining": 3, "guesses": [...], "word": "carry", "difficulty": "medium", "hint": "Hold and move" }
 }
 ```
 Errors:
@@ -129,6 +145,9 @@ Returns up to the last 30 days of the caller's games, newest first, same shape a
 ```json
 { "games": [ { "date": "...", "status": "won", ... }, ... ] }
 ```
+
+### Infinite mode (`/game/infinite/current`, `/game/infinite/new`, `/game/infinite/guess`, `/game/infinite/history`)
+Same `game` shape and semantics as daily mode above (`mode: "infinite"` instead of `"daily"`), except **no `hint` field** — only `difficulty` (`"easy" | "medium" | "hard"`) is included, since infinite rounds are meant to stay unaided.
 
 ### How stats update
 After a game finishes (win or loss), `user.stats` changes automatically — refetch `/auth/me` (or use the `user` object returned by the next login) to get fresh values:

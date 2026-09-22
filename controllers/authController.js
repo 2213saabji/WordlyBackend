@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { OAuth2Client } = require('google-auth-library');
 
 const User = require('../models/User');
 const DeviceSession = require('../models/DeviceSession');
@@ -8,6 +9,10 @@ const { sendPasswordResetEmail } = require('../utils/email');
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const RESET_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+// Audience is read lazily (not at module load) so a missing GOOGLE_CLIENT_ID
+// only breaks googleAuth(), not the whole server at startup.
+const googleClient = new OAuth2Client();
 
 // Never needed once a doc leaves the DB layer — trims what publicUser() would
 // have to ignore off the wire on every read-only user fetch.
@@ -80,13 +85,80 @@ async function login(req, res) {
   }
 
   const user = await User.findOne({ email: email.toLowerCase() });
-  if (!user) {
+  // Same generic message for "no such user", "wrong password", and
+  // "this account has no password" (Google-only account) — don't let this
+  // endpoint reveal which of those is actually true.
+  if (!user || !user.passwordHash) {
     return res.status(401).json({ message: 'Invalid email or password' });
   }
 
   const matches = await bcrypt.compare(password, user.passwordHash);
   if (!matches) {
     return res.status(401).json({ message: 'Invalid email or password' });
+  }
+
+  const token = signToken(user._id);
+  await issueDeviceSession(user._id, deviceId);
+  return res.json({ token, deviceId, user: publicUser(user) });
+}
+
+// Verifies a Google ID token (the `credential` Google Identity Services
+// hands the frontend after the user picks an account) and signs the caller
+// into this app — creating an account on first sign-in, or linking Google
+// to an existing email/password account on subsequent ones. The ID token is
+// verified server-side against Google's public keys; the frontend never
+// gets to just assert "trust me, this is alice@example.com".
+async function googleAuth(req, res) {
+  const { idToken, deviceId } = req.body;
+
+  if (!idToken || !deviceId) {
+    return res.status(400).json({ message: 'idToken and deviceId are required' });
+  }
+  if (!process.env.GOOGLE_CLIENT_ID) {
+    console.error('GOOGLE_CLIENT_ID is not configured');
+    return res.status(500).json({ message: 'Google sign-in is not configured on the server' });
+  }
+
+  let payload;
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    payload = ticket.getPayload();
+  } catch (err) {
+    return res.status(401).json({ message: 'Invalid Google credential' });
+  }
+
+  if (!payload || !payload.email || !payload.sub) {
+    return res.status(401).json({ message: 'Invalid Google credential' });
+  }
+  if (!payload.email_verified) {
+    return res.status(401).json({ message: 'Google account email is not verified' });
+  }
+
+  const email = payload.email.toLowerCase();
+  const googleId = payload.sub;
+
+  let user = await User.findOne({ googleId });
+
+  if (!user) {
+    // First time this Google identity has signed in here — check whether an
+    // email/password account already owns this email before creating a new
+    // one, so the two don't collide on the unique email index.
+    user = await User.findOne({ email });
+    if (user) {
+      user.googleId = googleId;
+      await user.save();
+    }
+  }
+
+  if (!user) {
+    user = await User.create({
+      username: payload.name || email.split('@')[0],
+      email,
+      googleId,
+    });
   }
 
   const token = signToken(user._id);
@@ -216,6 +288,7 @@ async function resetPassword(req, res) {
 module.exports = {
   signup,
   login,
+  googleAuth,
   refresh,
   logout,
   me,

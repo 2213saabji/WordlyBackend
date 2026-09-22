@@ -3,11 +3,17 @@ const User = require('../models/User');
 const { VALID_GUESS_SET } = require('../data/words');
 const { evaluateGuess, isWin } = require('../utils/wordleLogic');
 const { todayKey, wordForDate, infiniteWordForRound, isConsecutiveDay } = require('../utils/dailyWord');
+const { difficultyForDailyWord, difficultyForInfiniteWord } = require('../utils/wordDifficulty');
+const { hintForWord } = require('../utils/wordHints');
 
 const MAX_ATTEMPTS = 6;
 const WORD_LENGTH = 5;
 
 function serializeGame(game) {
+  const difficulty = game.mode === 'daily'
+    ? difficultyForDailyWord(game.word)
+    : difficultyForInfiniteWord(game.word);
+
   return {
     mode: game.mode,
     date: game.date,
@@ -17,6 +23,9 @@ function serializeGame(game) {
     guesses: game.guesses.map((g) => ({ guess: g.guess, result: g.result })),
     // Only reveal the answer once the game is over.
     word: game.status === 'in-progress' ? undefined : game.word,
+    difficulty,
+    // Hint is only exposed for daily mode.
+    hint: game.mode === 'daily' ? hintForWord(game.word) : undefined,
     timeTakenMs: game.timeTakenMs,
   };
 }

@@ -10,7 +10,14 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
-    passwordHash: { type: String, required: true },
+    // Not required: an account created via Google sign-in has no password
+    // until (if ever) the user sets one.
+    passwordHash: { type: String, default: null },
+
+    // Google's stable per-user id ("sub" claim). Present only for accounts
+    // that have signed in with Google at least once — see googleAuth() in
+    // authController.js.
+    googleId: { type: String, default: null, unique: true, sparse: true },
 
     resetPasswordTokenHash: { type: String, default: null },
     resetPasswordExpires: { type: Date, default: null },

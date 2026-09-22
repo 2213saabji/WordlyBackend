@@ -8,6 +8,8 @@ const {
   VALID_GUESS_SET,
 } = require('../data/words');
 const { wordForDate, infiniteWordForRound } = require('../utils/dailyWord');
+const { WORD_HINTS } = require('../data/wordHints');
+const { difficultyForDailyWord, difficultyForInfiniteWord } = require('../utils/wordDifficulty');
 
 let failures = 0;
 function check(name, ok, detail) {
@@ -96,6 +98,24 @@ const infBoundaryPrev = infiniteWordForRound('userA', 1455);
 check('no repeat across the cycle boundary', infBoundaryPrev !== infNext);
 const infB0 = infiniteWordForRound('userB', 0);
 check('different users get different shuffles', infB0 !== infA[0], infB0 + ' vs ' + infA[0]);
+
+console.log('\nword metadata (hints + difficulty)');
+// Every daily (ANSWERS) word must have a hint — that's what /game/today
+// exposes. INFINITE_ANSWERS coverage is currently partial by design (see
+// data/wordHints.js header) — missing ones resolve to "" via hintForWord(),
+// so that's reported here, not treated as a failure.
+const missingDailyHints = ANSWERS.filter((w) => !(w in WORD_HINTS));
+const missingInfiniteHints = INFINITE_ANSWERS.filter((w) => !(w in WORD_HINTS));
+const answerPool = [...ANSWERS, ...INFINITE_ANSWERS];
+const extraHints = Object.keys(WORD_HINTS).filter((w) => !answerPool.includes(w));
+check('every daily (ANSWERS) word has a hint', missingDailyHints.length === 0, missingDailyHints.slice(0, 5).join(','));
+console.log('  info  infinite hint coverage: ' + (INFINITE_ANSWERS.length - missingInfiniteHints.length) + '/' + INFINITE_ANSWERS.length);
+check('no hints for words outside ANSWERS/INFINITE_ANSWERS', extraHints.length === 0, extraHints.slice(0, 5).join(','));
+const validDifficulties = new Set(['easy', 'medium', 'hard']);
+check('every daily word gets a valid difficulty',
+  ANSWERS.every((w) => validDifficulties.has(difficultyForDailyWord(w))));
+check('every infinite word gets a valid difficulty',
+  INFINITE_ANSWERS.every((w) => validDifficulties.has(difficultyForInfiniteWord(w))));
 
 console.log(failures ? '\n' + failures + ' check(s) failed' : '\nall checks passed');
 process.exit(failures ? 1 : 0);

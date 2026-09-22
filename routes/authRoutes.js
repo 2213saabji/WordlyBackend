@@ -5,6 +5,7 @@ const { requireAuth } = require('../middleware/auth');
 const {
   signup,
   login,
+  googleAuth,
   refresh,
   logout,
   me,
@@ -14,6 +15,7 @@ const {
 
 router.post('/signup', signup);
 router.post('/login', login);
+router.post('/google', googleAuth);
 router.post('/refresh', refresh);
 router.post('/logout', requireAuth, logout);
 router.get('/me', requireAuth, me);
