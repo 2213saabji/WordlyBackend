@@ -147,7 +147,7 @@ Returns up to the last 30 days of the caller's games, newest first, same shape a
 ```
 
 ### Infinite mode (`/game/infinite/current`, `/game/infinite/new`, `/game/infinite/guess`, `/game/infinite/history`)
-Same `game` shape and semantics as daily mode above (`mode: "infinite"` instead of `"daily"`), except **no `hint` field** — only `difficulty` (`"easy" | "medium" | "hard"`) is included, since infinite rounds are meant to stay unaided.
+Same `game` shape and semantics as daily mode above (`mode: "infinite"` instead of `"daily"`), including `difficulty` (`"easy" | "medium" | "hard"`) and `hint`.
 
 ### How stats update
 After a game finishes (win or loss), `user.stats` changes automatically — refetch `/auth/me` (or use the `user` object returned by the next login) to get fresh values:

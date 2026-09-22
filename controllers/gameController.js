@@ -24,8 +24,7 @@ function serializeGame(game) {
     // Only reveal the answer once the game is over.
     word: game.status === 'in-progress' ? undefined : game.word,
     difficulty,
-    // Hint is only exposed for daily mode.
-    hint: game.mode === 'daily' ? hintForWord(game.word) : undefined,
+    hint: hintForWord(game.word),
     timeTakenMs: game.timeTakenMs,
   };
 }

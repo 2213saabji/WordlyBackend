@@ -100,16 +100,15 @@ const infB0 = infiniteWordForRound('userB', 0);
 check('different users get different shuffles', infB0 !== infA[0], infB0 + ' vs ' + infA[0]);
 
 console.log('\nword metadata (hints + difficulty)');
-// Every daily (ANSWERS) word must have a hint — that's what /game/today
-// exposes. INFINITE_ANSWERS coverage is currently partial by design (see
-// data/wordHints.js header) — missing ones resolve to "" via hintForWord(),
-// so that's reported here, not treated as a failure.
+// Every word in both pools must have a hint — /game/today and the infinite
+// endpoints both expose it. Missing ones would silently resolve to "" via
+// hintForWord(), so this is a hard failure, not just a report.
 const missingDailyHints = ANSWERS.filter((w) => !(w in WORD_HINTS));
 const missingInfiniteHints = INFINITE_ANSWERS.filter((w) => !(w in WORD_HINTS));
 const answerPool = [...ANSWERS, ...INFINITE_ANSWERS];
 const extraHints = Object.keys(WORD_HINTS).filter((w) => !answerPool.includes(w));
 check('every daily (ANSWERS) word has a hint', missingDailyHints.length === 0, missingDailyHints.slice(0, 5).join(','));
-console.log('  info  infinite hint coverage: ' + (INFINITE_ANSWERS.length - missingInfiniteHints.length) + '/' + INFINITE_ANSWERS.length);
+check('every infinite (INFINITE_ANSWERS) word has a hint', missingInfiniteHints.length === 0, missingInfiniteHints.slice(0, 5).join(','));
 check('no hints for words outside ANSWERS/INFINITE_ANSWERS', extraHints.length === 0, extraHints.slice(0, 5).join(','));
 const validDifficulties = new Set(['easy', 'medium', 'hard']);
 check('every daily word gets a valid difficulty',
