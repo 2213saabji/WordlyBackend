@@ -12,8 +12,8 @@ const WebAuthnChallenge = require('../models/WebAuthnChallenge');
 const { signToken, publicUser, issueDeviceSession } = require('./authController');
 
 const RP_NAME = process.env.WEBAUTHN_RP_NAME || 'Wordle';
-const RP_ID = process.env.WEBAUTHN_RP_ID || 'wordly-frontend-steel.vercel.app';
-const ORIGIN = process.env.WEBAUTHN_ORIGIN || 'https://wordly-frontend-steel.vercel.app';
+const RP_ID = process.env.WEBAUTHN_RP_ID || 'guessword.games';
+const ORIGIN = process.env.WEBAUTHN_ORIGIN || 'https://www.guessword.games';
 
 // --- Registration: enroll a passkey for this device, for the currently
 // signed-in user. Call this right after a normal email/password login, as
