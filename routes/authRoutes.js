@@ -9,6 +9,7 @@ const {
   refresh,
   logout,
   me,
+  updateUsername,
   forgotPassword,
   resetPassword,
 } = require('../controllers/authController');
@@ -19,6 +20,7 @@ router.post('/google', googleAuth);
 router.post('/refresh', refresh);
 router.post('/logout', requireAuth, logout);
 router.get('/me', requireAuth, me);
+router.patch('/username', requireAuth, updateUsername);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password/:token', resetPassword);
 

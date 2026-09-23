@@ -73,6 +73,13 @@ Errors: `400` missing `idToken`/`deviceId`; `401` invalid/expired/unverified-ema
 ### `GET /auth/me`
 Auth required. Returns the current user's profile in the same `user` shape as above (includes live `stats` and `groups`). Use this to rehydrate session on app load.
 
+### `PATCH /auth/username`
+Auth required. Updates the caller's display name.
+```json
+{ "username": "NewName" }
+```
+Response `200`: the updated `user` object, same shape as signup/login. `400` if `username` is missing, blank, or outside 2–30 characters after trimming. Usernames are not unique — no `409` for this endpoint.
+
 ### `POST /auth/forgot-password`
 ```json
 { "email": "alice@example.com" }

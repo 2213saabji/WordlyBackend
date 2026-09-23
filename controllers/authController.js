@@ -221,6 +221,29 @@ async function me(req, res) {
   return res.json({ user: publicUser(user) });
 }
 
+async function updateUsername(req, res) {
+  const { username } = req.body;
+
+  if (typeof username !== 'string' || !username.trim()) {
+    return res.status(400).json({ message: 'username is required' });
+  }
+  const trimmed = username.trim();
+  if (trimmed.length < 2 || trimmed.length > 30) {
+    return res.status(400).json({ message: 'username must be between 2 and 30 characters' });
+  }
+
+  const user = await User.findByIdAndUpdate(
+    req.userId,
+    { username: trimmed },
+    { new: true }
+  ).select(PUBLIC_USER_EXCLUDE);
+
+  if (!user) {
+    return res.status(404).json({ message: 'User not found' });
+  }
+  return res.json({ user: publicUser(user) });
+}
+
 async function forgotPassword(req, res) {
   const { email } = req.body;
   if (!email) {
@@ -292,6 +315,7 @@ module.exports = {
   refresh,
   logout,
   me,
+  updateUsername,
   forgotPassword,
   resetPassword,
   // Reused by webauthnController.js so a successful passkey authentication
