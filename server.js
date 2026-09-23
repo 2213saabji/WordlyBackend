@@ -16,6 +16,7 @@ const PORT = process.env.PORT || 8888;
 
 // Middleware
 const allowedOrigins = [
+  'https://www.guessword.games',
   'http://localhost:3001',
   'http://127.0.0.1:3001',
   'http://localhost:3000',
