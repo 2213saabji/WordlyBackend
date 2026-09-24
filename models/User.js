@@ -16,8 +16,10 @@ const userSchema = new mongoose.Schema(
 
     // Google's stable per-user id ("sub" claim). Present only for accounts
     // that have signed in with Google at least once — see googleAuth() in
-    // authController.js.
-    googleId: { type: String, default: null, unique: true, sparse: true },
+    // authController.js. No default: leaving it unset (not null) is what
+    // lets the partial index below actually exclude non-Google accounts —
+    // `sparse` alone doesn't, since a stored `null` still counts as present.
+    googleId: { type: String },
 
     resetPasswordTokenHash: { type: String, default: null },
     resetPasswordExpires: { type: Date, default: null },
@@ -40,5 +42,13 @@ const userSchema = new mongoose.Schema(
 // sits at the default null, so the index buckets those together and still
 // makes the actual token lookup an O(log n) point query instead of a scan.
 userSchema.index({ resetPasswordTokenHash: 1, resetPasswordExpires: 1 });
+
+// Unique only among accounts that actually have a googleId — a partial
+// index (unlike `sparse`) correctly ignores documents where the field is
+// absent, so any number of non-Google accounts can coexist.
+userSchema.index(
+  { googleId: 1 },
+  { unique: true, partialFilterExpression: { googleId: { $type: 'string' } } }
+);
 
 module.exports = mongoose.model('User', userSchema);
