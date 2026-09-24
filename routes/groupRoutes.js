@@ -6,6 +6,7 @@ const {
   createGroup,
   joinGroup,
   myGroups,
+  updateGroupName,
   leaveGroup,
   leaderboard,
   dailyLeaderboard,
@@ -17,6 +18,7 @@ router.use(requireAuth);
 router.post('/', createGroup);
 router.get('/mine', myGroups);
 router.post('/join/:code', joinGroup);
+router.patch('/:id', updateGroupName);
 router.post('/:id/leave', leaveGroup);
 router.get('/:id/leaderboard', leaderboard);
 router.get('/:id/leaderboard/daily', dailyLeaderboard);

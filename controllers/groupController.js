@@ -64,6 +64,29 @@ async function myGroups(req, res) {
   return res.json({ groups: items, pagination });
 }
 
+async function updateGroupName(req, res) {
+  const { id } = req.params;
+  const { name } = req.body;
+
+  if (typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ message: 'Group name is required' });
+  }
+
+  const group = await Group.findById(id);
+  if (!group) {
+    return res.status(404).json({ message: 'Group not found' });
+  }
+
+  if (group.owner.toString() !== req.userId) {
+    return res.status(403).json({ message: 'Only the group owner can rename this group' });
+  }
+
+  group.name = name.trim();
+  await group.save();
+
+  return res.json({ group });
+}
+
 async function leaveGroup(req, res) {
   const { id } = req.params;
   const group = await Group.findById(id);
@@ -200,6 +223,7 @@ module.exports = {
   createGroup,
   joinGroup,
   myGroups,
+  updateGroupName,
   leaveGroup,
   leaderboard,
   dailyLeaderboard,

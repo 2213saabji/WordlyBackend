@@ -1,0 +1,46 @@
+name: Contact digest emails
+
+# Triggers the two cron-protected digest endpoints on a schedule, instead of
+# relying on Vercel Cron (which would need a vercel.json that could conflict
+# with however this project's Vercel deployment is currently configured).
+# See controllers/cronController.js for what each endpoint actually does.
+on:
+  schedule:
+    # Daily digest — every day at 23:00 UTC
+    - cron: '0 23 * * *'
+    # Weekly digest — every Sunday at 23:30 UTC (after that day's daily run,
+    # so the week's final day is captured in both before data gets cleared)
+    - cron: '30 23 * * 0'
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'Which digest to trigger manually'
+        required: true
+        default: 'daily'
+        type: choice
+        options:
+          - daily
+          - weekly
+
+env:
+  API_BASE_URL: https://wordly-backend-nu.vercel.app
+
+jobs:
+  trigger-digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pick daily or weekly based on how this run was triggered
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "path=${{ inputs.job }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "30 23 * * 0" ]; then
+            echo "path=weekly" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=daily" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Call /api/cron/contact-digest-${{ steps.target.outputs.path }}
+        run: |
+          curl -sf -X GET "$API_BASE_URL/api/cron/contact-digest-${{ steps.target.outputs.path }}" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

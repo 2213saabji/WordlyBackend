@@ -147,4 +147,86 @@ async function sendPasswordResetEmail(toEmail, resetToken) {
   });
 }
 
-module.exports = { sendPasswordResetEmail };
+// Contact submissions carry free-text user input (name/message) straight
+// into an HTML email — escape it so a submission can't inject markup/script
+// into the notification or digest emails.
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+const CONTACT_NOTIFY_EMAIL = process.env.CONTACT_NOTIFY_EMAIL || 'support@guessword.games';
+
+// Immediate per-submission notification, sent the moment someone submits
+// the contact form (in addition to it being stored for the digest emails).
+async function sendContactNotificationEmail(submission) {
+  const { category, name, email, message } = submission;
+
+  await getTransporter().sendMail({
+    from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+    to: CONTACT_NOTIFY_EMAIL,
+    replyTo: email,
+    subject: `[GuessWord Contact] ${category}: ${name}`,
+    html: `
+      <p><strong>Category:</strong> ${escapeHtml(category)}</p>
+      <p><strong>Name:</strong> ${escapeHtml(name)}</p>
+      <p><strong>Email:</strong> ${escapeHtml(email)}</p>
+      <p><strong>Message:</strong></p>
+      <p>${escapeHtml(message).replace(/\n/g, '<br>')}</p>
+    `,
+  });
+}
+
+// Shared by both the daily and weekly digest cron jobs — same table layout,
+// different recipients/subject/range label.
+async function sendContactDigestEmail({ to, subject, rangeLabel, submissions }) {
+  const rows = submissions
+    .map(
+      (s) => `
+        <tr>
+          <td style="padding:8px;border:1px solid #ddd;">${escapeHtml(new Date(s.createdAt).toISOString())}</td>
+          <td style="padding:8px;border:1px solid #ddd;">${escapeHtml(s.category)}</td>
+          <td style="padding:8px;border:1px solid #ddd;">${escapeHtml(s.name)}</td>
+          <td style="padding:8px;border:1px solid #ddd;">${escapeHtml(s.email)}</td>
+          <td style="padding:8px;border:1px solid #ddd;">${escapeHtml(s.message).replace(/\n/g, '<br>')}</td>
+        </tr>`
+    )
+    .join('');
+
+  const html = `
+    <p><strong>${escapeHtml(rangeLabel)}</strong> — ${submissions.length} submission${submissions.length === 1 ? '' : 's'}.</p>
+    ${
+      submissions.length
+        ? `<table style="border-collapse:collapse;width:100%;font-family:Arial,Helvetica,sans-serif;font-size:13px;">
+            <thead>
+              <tr>
+                <th style="padding:8px;border:1px solid #ddd;text-align:left;">Received (UTC)</th>
+                <th style="padding:8px;border:1px solid #ddd;text-align:left;">Category</th>
+                <th style="padding:8px;border:1px solid #ddd;text-align:left;">Name</th>
+                <th style="padding:8px;border:1px solid #ddd;text-align:left;">Email</th>
+                <th style="padding:8px;border:1px solid #ddd;text-align:left;">Message</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>`
+        : '<p>No submissions in this period.</p>'
+    }
+  `;
+
+  await getTransporter().sendMail({
+    from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+    to,
+    subject,
+    html,
+  });
+}
+
+module.exports = {
+  sendPasswordResetEmail,
+  sendContactNotificationEmail,
+  sendContactDigestEmail,
+};

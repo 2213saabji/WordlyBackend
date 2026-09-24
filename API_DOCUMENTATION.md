@@ -199,6 +199,13 @@ GET /groups/mine?page=1&limit=20
 }
 ```
 
+### `PATCH /groups/:id`
+Renames a group. **Owner only.**
+```json
+{ "name": "New Group Name" }
+```
+Response `200`: the updated `group` object, same shape as `POST /groups`. `400` if `name` is missing or blank after trimming; `404` if the group doesn't exist; `403` if the caller is a member but not the owner (or not a member at all).
+
 ### `POST /groups/:id/leave`
 Removes the caller from the group. `{ "message": "Left group" }`.
 
@@ -290,6 +297,31 @@ Same as daily, aggregated Mon–Sun (the week containing `?date=`, defaults to t
 }
 ```
 Pagination rules (`page`, `limit`, clamping) are identical to the group leaderboard endpoints — see [Leaderboard pagination](#leaderboard-pagination) above.
+
+---
+
+## 5. Contact endpoint
+
+### `POST /contact`
+Public — **no auth required**, anyone can submit (logged in or not).
+```json
+{
+  "category": "bug",
+  "name": "Alice",
+  "email": "alice@example.com",
+  "message": "Found a bug in infinite mode..."
+}
+```
+- `category` must be one of: `"bug" | "word-suggestion" | "account" | "groups" | "other"`.
+- `name`, `email`, `message` are all required strings; `email` is validated as a basic email shape; `message` is capped at 4000 characters.
+
+Response `201`:
+```json
+{ "message": "Thanks — we got your message." }
+```
+Errors: `400` on any missing/invalid field (see the message for which one).
+
+**What happens server-side** (informational, not something the frontend needs to orchestrate): the submission is stored, and an immediate notification email goes to the support inbox. Separately, backend-only scheduled jobs compile a daily and a weekly digest of all stored submissions and email them out, clearing the week's data after the weekly digest sends. None of that requires anything from the frontend beyond this one `POST` call.
 
 ---
 

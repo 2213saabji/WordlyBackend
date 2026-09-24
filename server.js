@@ -10,6 +10,8 @@ const gameRoutes = require('./routes/gameRoutes');
 const groupRoutes = require('./routes/groupRoutes');
 const leaderboardRoutes = require('./routes/leaderboardRoutes');
 const webauthnRoutes = require('./routes/webauthnRoutes');
+const contactRoutes = require('./routes/contactRoutes');
+const cronRoutes = require('./routes/cronRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 8888;
@@ -80,6 +82,8 @@ app.use('/api/game', gameRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/auth/webauthn', webauthnRoutes);
+app.use('/api/contact', contactRoutes);
+app.use('/api/cron', cronRoutes);
 
 // 404 handler
 app.use((req, res) => {
