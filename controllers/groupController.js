@@ -4,24 +4,10 @@ const Group = require('../models/Group');
 const User = require('../models/User');
 const Game = require('../models/Game');
 const { todayKey } = require('../utils/dailyWord');
-const { getWeekRange, rankDailyEntries, rankWeeklyEntries, paginate } = require('../utils/leaderboard');
-
-const DEFAULT_LEADERBOARD_LIMIT = 20;
-const MAX_LEADERBOARD_LIMIT = 100;
+const { getWeekRange, rankDailyEntries, rankWeeklyEntries, paginate, parsePagination } = require('../utils/leaderboard');
 
 function generateInviteCode() {
   return crypto.randomBytes(4).toString('hex').toUpperCase(); // e.g. 'A1B2C3D4'
-}
-
-// Clamps page/limit from query params to sane bounds instead of trusting
-// them outright — a bad `limit` shouldn't be able to force a huge scan.
-function parsePagination(query) {
-  const page = Number.parseInt(query.page, 10);
-  const limit = Number.parseInt(query.limit, 10);
-  return {
-    page: Number.isFinite(page) && page > 0 ? page : 1,
-    limit: Number.isFinite(limit) && limit > 0 ? Math.min(limit, MAX_LEADERBOARD_LIMIT) : DEFAULT_LEADERBOARD_LIMIT,
-  };
 }
 
 async function createGroup(req, res) {
@@ -69,8 +55,13 @@ async function joinGroup(req, res) {
 async function myGroups(req, res) {
   const groups = await Group.find({ members: req.userId })
     .select('name inviteCode owner members createdAt')
+    .sort({ createdAt: -1 })
     .lean();
-  return res.json({ groups });
+
+  const { page, limit } = parsePagination(req.query);
+  const { items, pagination } = paginate(groups, page, limit);
+
+  return res.json({ groups: items, pagination });
 }
 
 async function leaveGroup(req, res) {

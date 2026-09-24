@@ -188,9 +188,15 @@ Show `inviteCode` prominently — it's what other users type in to join.
 Response `200`: the updated `group` object. `404` invalid code, `409` already a member.
 
 ### `GET /groups/mine`
-List every group the caller belongs to.
+List every group the caller belongs to, newest first. **Paginated** — same `page`/`limit` params and clamping behavior as the leaderboard endpoints (see [Leaderboard pagination](#leaderboard-pagination)).
+```
+GET /groups/mine?page=1&limit=20
+```
 ```json
-{ "groups": [ { "name": "...", "inviteCode": "...", "owner": "...", "members": [...], "createdAt": "..." } ] }
+{
+  "groups": [ { "name": "...", "inviteCode": "...", "owner": "...", "members": [...], "createdAt": "..." } ],
+  "pagination": { "page": 1, "limit": 20, "total": 7, "totalPages": 1 }
+}
 ```
 
 ### `POST /groups/:id/leave`
@@ -249,6 +255,41 @@ Same as daily, but aggregated across the Mon–Sun week containing the reference
 All three endpoints above accept the same optional query params:
 - `page` — 1-indexed, defaults to `1`. Out-of-range values are clamped to the last valid page rather than returning an empty result or an error.
 - `limit` — page size, defaults to `20`, capped at `100`. Invalid or missing values fall back to the default.
+
+---
+
+## 4. Global leaderboard endpoints
+
+Same ranking logic as the group daily/weekly leaderboards above, but across **every** daily player, not scoped to a group. Auth required (any authenticated user, no membership check).
+
+### `GET /leaderboard/daily`
+Ranks everyone who finished today's daily game (won or lost). **Paginated** — see below. Optional `?date=YYYY-MM-DD` (defaults to today, UTC).
+```
+GET /api/leaderboard/daily?page=1&limit=20
+```
+```json
+{
+  "date": "2026-09-24",
+  "leaderboard": [
+    { "rank": 1, "userId": "66f...", "username": "Bob", "status": "won", "attemptsUsed": 3, "timeTakenMs": 45000 }
+  ],
+  "pagination": { "page": 1, "limit": 20, "total": 512, "totalPages": 26 }
+}
+```
+No `me` field here (unlike the group version) — this endpoint isn't scoped to a small enough set that "find yourself" is the primary use case.
+
+### `GET /leaderboard/weekly`
+Same as daily, aggregated Mon–Sun (the week containing `?date=`, defaults to today). **Paginated** the same way.
+```json
+{
+  "week": { "start": "2026-09-21", "end": "2026-09-27" },
+  "leaderboard": [
+    { "rank": 1, "userId": "66f...", "username": "Bob", "gamesPlayed": 5, "gamesWon": 5, "avgAttempts": 3.4, "avgTimeMs": 52000 }
+  ],
+  "pagination": { "page": 1, "limit": 20, "total": 512, "totalPages": 26 }
+}
+```
+Pagination rules (`page`, `limit`, clamping) are identical to the group leaderboard endpoints — see [Leaderboard pagination](#leaderboard-pagination) above.
 
 ---
 

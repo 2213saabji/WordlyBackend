@@ -87,7 +87,7 @@ function rankWeeklyEntries(games) {
 }
 
 // Slices an already-ranked array into one page. `page` and `limit` are
-// assumed pre-validated (see parsePagination in groupController.js).
+// assumed pre-validated (see parsePagination below).
 function paginate(entries, page, limit) {
   const total = entries.length;
   const totalPages = Math.max(1, Math.ceil(total / limit));
@@ -100,4 +100,19 @@ function paginate(entries, page, limit) {
   };
 }
 
-module.exports = { getWeekRange, rankDailyEntries, rankWeeklyEntries, paginate };
+const DEFAULT_LEADERBOARD_LIMIT = 20;
+const MAX_LEADERBOARD_LIMIT = 100;
+
+// Clamps page/limit from query params to sane bounds instead of trusting
+// them outright — a bad `limit` shouldn't be able to force a huge scan.
+// Shared by both the group-scoped and global leaderboard endpoints.
+function parsePagination(query) {
+  const page = Number.parseInt(query.page, 10);
+  const limit = Number.parseInt(query.limit, 10);
+  return {
+    page: Number.isFinite(page) && page > 0 ? page : 1,
+    limit: Number.isFinite(limit) && limit > 0 ? Math.min(limit, MAX_LEADERBOARD_LIMIT) : DEFAULT_LEADERBOARD_LIMIT,
+  };
+}
+
+module.exports = { getWeekRange, rankDailyEntries, rankWeeklyEntries, paginate, parsePagination };

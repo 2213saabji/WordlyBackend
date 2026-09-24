@@ -1,6 +1,6 @@
 const Game = require('../models/Game');
 const { todayKey } = require('../utils/dailyWord');
-const { getWeekRange, rankDailyEntries, rankWeeklyEntries } = require('../utils/leaderboard');
+const { getWeekRange, rankDailyEntries, rankWeeklyEntries, paginate, parsePagination } = require('../utils/leaderboard');
 
 async function daily(req, res) {
   const date = typeof req.query.date === 'string' ? req.query.date : todayKey();
@@ -12,7 +12,10 @@ async function daily(req, res) {
     .populate('user', 'username')
     .lean();
 
-  return res.json({ date, leaderboard: rankDailyEntries(games) });
+  const { page, limit } = parsePagination(req.query);
+  const { items, pagination } = paginate(rankDailyEntries(games), page, limit);
+
+  return res.json({ date, leaderboard: items, pagination });
 }
 
 async function weekly(req, res) {
@@ -28,7 +31,10 @@ async function weekly(req, res) {
     .populate('user', 'username')
     .lean();
 
-  return res.json({ week: { start, end }, leaderboard: rankWeeklyEntries(games) });
+  const { page, limit } = parsePagination(req.query);
+  const { items, pagination } = paginate(rankWeeklyEntries(games), page, limit);
+
+  return res.json({ week: { start, end }, leaderboard: items, pagination });
 }
 
 module.exports = { daily, weekly };
