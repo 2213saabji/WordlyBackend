@@ -197,17 +197,58 @@ List every group the caller belongs to.
 Removes the caller from the group. `{ "message": "Left group" }`.
 
 ### `GET /groups/:id/leaderboard`
-Auth required, caller must be a member (`403` otherwise). Sorted by current streak, then total wins, descending — render top-to-bottom as-is, no client-side re-sort needed.
+Auth required, caller must be a member (`403` otherwise). Sorted by current streak, then total wins, descending — render top-to-bottom as-is, no client-side re-sort needed. **Paginated** — see below.
+```
+GET /groups/66f.../leaderboard?page=1&limit=20
+```
 ```json
 {
   "group": { "id": "66f...", "name": "Office Wordlers", "inviteCode": "D87B4835" },
   "leaderboard": [
-    { "userId": "66f...", "username": "Bob", "gamesPlayed": 12, "gamesWon": 10, "currentStreak": 4, "maxStreak": 6, "winRate": 83.3 },
-    { "userId": "66f...", "username": "Alice", "gamesPlayed": 8, "gamesWon": 5, "currentStreak": 0, "maxStreak": 3, "winRate": 62.5 }
-  ]
+    { "rank": 1, "userId": "66f...", "username": "Bob", "gamesPlayed": 12, "gamesWon": 10, "currentStreak": 4, "maxStreak": 6, "winRate": 83.3 },
+    { "rank": 2, "userId": "66f...", "username": "Alice", "gamesPlayed": 8, "gamesWon": 5, "currentStreak": 0, "maxStreak": 3, "winRate": 62.5 }
+  ],
+  "pagination": { "page": 1, "limit": 20, "total": 34, "totalPages": 2 }
 }
 ```
 `winRate` is a percentage (0–100, one decimal place).
+
+### `GET /groups/:id/leaderboard/daily`
+Auth required, caller must be a member. Ranks only members who have **finished** today's daily game (won or lost) — members still in-progress or who haven't played today don't appear. Sorted by win first, then fewer attempts, then faster time. **Paginated**, plus the caller's own entry is always included via `me` regardless of pagination (see below). Optional `?date=YYYY-MM-DD` (defaults to today, UTC).
+```
+GET /groups/66f.../leaderboard/daily?page=1&limit=20
+```
+```json
+{
+  "group": { "id": "66f...", "name": "Office Wordlers" },
+  "date": "2026-09-24",
+  "leaderboard": [
+    { "rank": 1, "userId": "66f...", "username": "Bob", "status": "won", "attemptsUsed": 3, "timeTakenMs": 45000 }
+  ],
+  "pagination": { "page": 1, "limit": 20, "total": 34, "totalPages": 2 },
+  "me": { "rank": 27, "userId": "66f...", "username": "You", "status": "won", "attemptsUsed": 5, "timeTakenMs": 120000 }
+}
+```
+- `me` is the caller's own ranked entry — **always present if they finished today's game**, even when their rank falls on a different page than the one requested. This is what lets the frontend show "you're #27" without a separate lookup or paging through everyone ahead of them.
+- `me` is `null` if the caller hasn't finished today's game yet (in-progress or not started) — they simply aren't ranked yet.
+
+### `GET /groups/:id/leaderboard/weekly`
+Same as daily, but aggregated across the Mon–Sun week containing the reference date (`?date=` optional, defaults to today). Sorted by most wins, then fewer average attempts, then faster average time. **Paginated** the same way as above — no `me` field.
+```json
+{
+  "group": { "id": "66f...", "name": "Office Wordlers" },
+  "week": { "start": "2026-09-21", "end": "2026-09-27" },
+  "leaderboard": [
+    { "rank": 1, "userId": "66f...", "username": "Bob", "gamesPlayed": 5, "gamesWon": 5, "avgAttempts": 3.4, "avgTimeMs": 52000 }
+  ],
+  "pagination": { "page": 1, "limit": 20, "total": 34, "totalPages": 2 }
+}
+```
+
+### Leaderboard pagination
+All three endpoints above accept the same optional query params:
+- `page` — 1-indexed, defaults to `1`. Out-of-range values are clamped to the last valid page rather than returning an empty result or an error.
+- `limit` — page size, defaults to `20`, capped at `100`. Invalid or missing values fall back to the default.
 
 ---
 

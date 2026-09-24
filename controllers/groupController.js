@@ -4,10 +4,24 @@ const Group = require('../models/Group');
 const User = require('../models/User');
 const Game = require('../models/Game');
 const { todayKey } = require('../utils/dailyWord');
-const { getWeekRange, rankDailyEntries, rankWeeklyEntries } = require('../utils/leaderboard');
+const { getWeekRange, rankDailyEntries, rankWeeklyEntries, paginate } = require('../utils/leaderboard');
+
+const DEFAULT_LEADERBOARD_LIMIT = 20;
+const MAX_LEADERBOARD_LIMIT = 100;
 
 function generateInviteCode() {
   return crypto.randomBytes(4).toString('hex').toUpperCase(); // e.g. 'A1B2C3D4'
+}
+
+// Clamps page/limit from query params to sane bounds instead of trusting
+// them outright — a bad `limit` shouldn't be able to force a huge scan.
+function parsePagination(query) {
+  const page = Number.parseInt(query.page, 10);
+  const limit = Number.parseInt(query.limit, 10);
+  return {
+    page: Number.isFinite(page) && page > 0 ? page : 1,
+    limit: Number.isFinite(limit) && limit > 0 ? Math.min(limit, MAX_LEADERBOARD_LIMIT) : DEFAULT_LEADERBOARD_LIMIT,
+  };
 }
 
 async function createGroup(req, res) {
@@ -102,11 +116,16 @@ async function leaderboard(req, res) {
         ? Number(((member.stats.gamesWon / member.stats.gamesPlayed) * 100).toFixed(1))
         : 0,
     }))
-    .sort((a, b) => b.currentStreak - a.currentStreak || b.gamesWon - a.gamesWon);
+    .sort((a, b) => b.currentStreak - a.currentStreak || b.gamesWon - a.gamesWon)
+    .map((entry, index) => ({ rank: index + 1, ...entry }));
+
+  const { page, limit } = parsePagination(req.query);
+  const { items, pagination } = paginate(leaderboardEntries, page, limit);
 
   return res.json({
     group: { id: group._id, name: group.name, inviteCode: group.inviteCode },
-    leaderboard: leaderboardEntries,
+    leaderboard: items,
+    pagination,
   });
 }
 
@@ -133,10 +152,22 @@ async function dailyLeaderboard(req, res) {
     .populate('user', 'username')
     .lean();
 
+  const entries = rankDailyEntries(games);
+  const { page, limit } = parsePagination(req.query);
+  const { items, pagination } = paginate(entries, page, limit);
+
+  // Guaranteed regardless of pagination: if the caller finished today's
+  // game (the only way they'd appear in `entries` at all, since the query
+  // above only pulls won/lost games for `date`), their own rank is always
+  // returned here — even when it falls outside the requested page.
+  const me = entries.find((entry) => entry.userId.toString() === req.userId) || null;
+
   return res.json({
     group: { id: group._id, name: group.name },
     date,
-    leaderboard: rankDailyEntries(games),
+    leaderboard: items,
+    pagination,
+    me,
   });
 }
 
@@ -162,10 +193,15 @@ async function weeklyLeaderboard(req, res) {
     .populate('user', 'username')
     .lean();
 
+  const entries = rankWeeklyEntries(games);
+  const { page, limit } = parsePagination(req.query);
+  const { items, pagination } = paginate(entries, page, limit);
+
   return res.json({
     group: { id: group._id, name: group.name },
     week: { start, end },
-    leaderboard: rankWeeklyEntries(games),
+    leaderboard: items,
+    pagination,
   });
 }
 

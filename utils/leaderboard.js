@@ -86,4 +86,18 @@ function rankWeeklyEntries(games) {
     .map((entry, index) => ({ rank: index + 1, ...entry }));
 }
 
-module.exports = { getWeekRange, rankDailyEntries, rankWeeklyEntries };
+// Slices an already-ranked array into one page. `page` and `limit` are
+// assumed pre-validated (see parsePagination in groupController.js).
+function paginate(entries, page, limit) {
+  const total = entries.length;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const clampedPage = Math.min(page, totalPages);
+  const start = (clampedPage - 1) * limit;
+
+  return {
+    items: entries.slice(start, start + limit),
+    pagination: { page: clampedPage, limit, total, totalPages },
+  };
+}
+
+module.exports = { getWeekRange, rankDailyEntries, rankWeeklyEntries, paginate };
