@@ -18,6 +18,34 @@ function getTransporter() {
   return transporter;
 }
 
+const NOREPLY_EMAIL_FROM = process.env.NOREPLY_EMAIL_FROM || 'noreply@guessword.games';
+
+let noreplyTransporter = null;
+
+// Password-reset mail goes out as noreply@. Most SMTP hosts (GoDaddy
+// included) reject a From that doesn't match the authenticated mailbox, so
+// if noreply@ is its own mailbox, give it its own credentials via
+// NOREPLY_EMAIL_USER/NOREPLY_EMAIL_PASS. Without them we fall back to the
+// shared transporter, which only works if noreply@ is an alias of EMAIL_USER.
+function getNoreplyTransporter() {
+  if (!process.env.NOREPLY_EMAIL_USER || !process.env.NOREPLY_EMAIL_PASS) {
+    return getTransporter();
+  }
+  if (noreplyTransporter) return noreplyTransporter;
+
+  noreplyTransporter = nodemailer.createTransport({
+    host: process.env.EMAIL_HOST,
+    port: Number(process.env.EMAIL_PORT) || 587,
+    secure: Number(process.env.EMAIL_PORT) === 465,
+    auth: {
+      user: process.env.NOREPLY_EMAIL_USER,
+      pass: process.env.NOREPLY_EMAIL_PASS,
+    },
+  });
+
+  return noreplyTransporter;
+}
+
 // Logo tiles spelling the brand name, styled like Wordle tiles (first letter
 // accented orange, the "W" accented green, rest dark) — see the inline
 // styles below for the shared per-tile look.
@@ -48,8 +76,8 @@ function brandTilesHtml(word) {
 async function sendPasswordResetEmail(toEmail, resetToken) {
   const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
 
-  await getTransporter().sendMail({
-    from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+  await getNoreplyTransporter().sendMail({
+    from: NOREPLY_EMAIL_FROM,
     to: toEmail,
     subject: 'Reset your GuessWord password',
     html: `<body style="margin:0;padding:0;background-color:#0F0B12;">
