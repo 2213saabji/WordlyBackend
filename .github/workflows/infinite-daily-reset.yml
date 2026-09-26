@@ -1,0 +1,41 @@
+name: Infinite tier daily reset
+
+# Settles the previous IST day for the Infinite tier leaderboard (day
+# counters, promotion, demotion, Tier 1 reward cycle). See
+# infiniteDailyReset in controllers/cronController.js.
+#
+# GitHub may start scheduled runs late; that's fine — the endpoint is
+# idempotent, catches up missed days, and requests settle their own user
+# lazily in the meantime.
+on:
+  schedule:
+    # 00:00 IST = 18:30 UTC
+    - cron: '30 18 * * *'
+  workflow_dispatch:
+
+env:
+  API_BASE_URL: https://wordly-backend-nu.vercel.app
+  MAX_CALLS: 200
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call /api/cron/infinite-daily-reset until done
+        run: |
+          failed=0
+          for i in $(seq 1 "$MAX_CALLS"); do
+            body=$(curl -sf -X POST "$API_BASE_URL/api/cron/infinite-daily-reset?batchSize=500" \
+              -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+            echo "$body"
+            failed=$((failed + $(echo "$body" | jq -r '.failed')))
+            if [ "$(echo "$body" | jq -r '.done')" = "true" ]; then
+              if [ "$failed" -gt 0 ]; then
+                echo "$failed member(s) failed to settle; see server logs" >&2
+                exit 1
+              fi
+              exit 0
+            fi
+          done
+          echo "Reset not done after $MAX_CALLS calls" >&2
+          exit 1

@@ -5,7 +5,9 @@ const { OAuth2Client } = require('google-auth-library');
 
 const User = require('../models/User');
 const DeviceSession = require('../models/DeviceSession');
+const TierMembership = require('../models/TierMembership');
 const { sendPasswordResetEmail } = require('../utils/email');
+const { getTierConfig, tierDef } = require('../utils/tierConfig');
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const RESET_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
@@ -214,11 +216,18 @@ async function logout(req, res) {
 }
 
 async function me(req, res) {
-  const user = await User.findById(req.userId).select(PUBLIC_USER_EXCLUDE).lean();
+  const [user, membership, tierConfig] = await Promise.all([
+    User.findById(req.userId).select(PUBLIC_USER_EXCLUDE).lean(),
+    TierMembership.findOne({ user: req.userId }).select('tier').lean(),
+    getTierConfig(),
+  ]);
   if (!user) {
     return res.status(404).json({ message: 'User not found' });
   }
-  return res.json({ user: publicUser(user) });
+  // Infinite tier badge for the header. Read as stored (not settled) — the
+  // tier only changes at the nightly reset, and /infinite/me settles fully.
+  const tier = membership ? membership.tier : 8;
+  return res.json({ user: publicUser(user), infinite: { tier, tierName: tierDef(tierConfig, tier).name } });
 }
 
 async function updateUsername(req, res) {

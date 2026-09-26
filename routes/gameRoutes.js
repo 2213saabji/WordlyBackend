@@ -8,6 +8,7 @@ const {
   history,
   getCurrentInfinite,
   newInfiniteGame,
+  revealInfiniteHint,
   submitInfiniteGuess,
   infiniteHistory,
 } = require('../controllers/gameController');
@@ -21,6 +22,7 @@ router.get('/history', history);
 router.get('/infinite/current', getCurrentInfinite);
 router.post('/infinite/new', newInfiniteGame);
 router.post('/infinite/guess', submitInfiniteGuess);
+router.post('/infinite/hint', revealInfiniteHint);
 router.get('/infinite/history', infiniteHistory);
 
 module.exports = router;

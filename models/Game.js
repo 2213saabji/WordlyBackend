@@ -11,11 +11,11 @@ const guessSchema = new mongoose.Schema(
 const gameSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    date: { type: String, required: true }, // 'YYYY-MM-DD' — the daily word key in 'daily' mode, just the day played in 'infinite' mode
+    date: { type: String, required: true }, // 'YYYY-MM-DD' — the daily word key (UTC) in 'daily' mode, the IST day started in 'infinite' mode
     word: { type: String, required: true }, // answer, never sent to the client directly
     guesses: { type: [guessSchema], default: [] },
-    // 'daily': one per user per date, feeds stats/streaks and the leaderboards.
-    // 'infinite': unlimited casual rounds, random word, never touches stats or leaderboards.
+    // 'daily': one per user per date, feeds stats/streaks and the daily/weekly/group leaderboards.
+    // 'infinite': unlimited rounds, never touches user.stats; feeds only the tier leaderboard.
     mode: { type: String, enum: ['daily', 'infinite'], default: 'daily' },
     status: {
       type: String,
@@ -24,6 +24,16 @@ const gameSchema = new mongoose.Schema(
     },
     completedAt: { type: Date, default: null },
     timeTakenMs: { type: Number, default: null }, // completedAt - createdAt, set once the game finishes
+
+    // --- Infinite tier leaderboard (infinite mode only; see utils/tiers.js).
+    countedDay: { type: String, default: null }, // IST day of completion - the day this game counts toward
+    tierAtStart: { type: Number, default: null },
+    tierAtCompletion: { type: Number, default: null },
+    hintRevealedAt: { type: Date, default: null }, // set by POST /game/infinite/hint
+    pointsAwarded: { type: Number, default: null },
+    scoredAt: { type: Date, default: null }, // guard: a game is scored at most once
+    clientIp: { type: String, default: null },
+    deviceId: { type: String, default: null },
   },
   { timestamps: true }
 );
@@ -37,5 +47,6 @@ gameSchema.index(
 gameSchema.index({ mode: 1, date: 1, status: 1 }); // leaderboard date/week range queries
 gameSchema.index({ user: 1, mode: 1, status: 1 }); // "find my current in-progress infinite game"
 gameSchema.index({ user: 1, mode: 1, createdAt: -1 }); // infiniteHistory() sort — {user,mode,status} above doesn't cover the createdAt sort
+gameSchema.index({ user: 1, mode: 1, countedDay: 1 }); // infinite games counted toward a given IST day
 
 module.exports = mongoose.model('Game', gameSchema);

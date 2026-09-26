@@ -73,15 +73,13 @@ function brandTilesHtml(word) {
     .join('');
 }
 
-async function sendPasswordResetEmail(toEmail, resetToken) {
-  const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
-
-  await getNoreplyTransporter().sendMail({
-    from: NOREPLY_EMAIL_FROM,
-    to: toEmail,
-    subject: 'Reset your GuessWord password',
-    html: `<body style="margin:0;padding:0;background-color:#0F0B12;">
-<span style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">Set a new password for GuessWord. This link expires in 15 minutes.͏‌&nbsp;͏‌&nbsp;͏‌&nbsp;͏‌&nbsp;͏‌&nbsp;</span>
+// Shared layout for single-action emails (password reset, email
+// verification): brand tiles, a card with eyebrow/heading/intro, one
+// button, an expiry pill and a paste-able fallback link. All `p` fields are
+// fixed server strings or server-built URLs, never user input.
+function actionEmailHtml(p) {
+  return `<body style="margin:0;padding:0;background-color:#0F0B12;">
+<span style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">${p.preheader}͏‌&nbsp;͏‌&nbsp;͏‌&nbsp;͏‌&nbsp;͏‌&nbsp;</span>
 
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0F0B12" style="background-color:#0F0B12;">
   <tbody><tr>
@@ -104,13 +102,13 @@ async function sendPasswordResetEmail(toEmail, resetToken) {
           <td bgcolor="#1F1725" style="background-color:#1F1725;border:1px solid #33283A;border-radius:24px;">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
               <tbody><tr>
-                <td class="pad" style="padding:44px 40px 0 40px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;color:#9A8AA2;mso-line-height-rule:exactly;line-height:18px;">Password reset</td>
+                <td class="pad" style="padding:44px 40px 0 40px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;color:#9A8AA2;mso-line-height-rule:exactly;line-height:18px;">${p.eyebrow}</td>
               </tr>
               <tr>
-                <td class="pad h1" style="padding:12px 40px 0 40px;font-family:Arial,Helvetica,sans-serif;font-size:30px;color:#F3ECEF;mso-line-height-rule:exactly;line-height:36px;">You requested a password reset.</td>
+                <td class="pad h1" style="padding:12px 40px 0 40px;font-family:Arial,Helvetica,sans-serif;font-size:30px;color:#F3ECEF;mso-line-height-rule:exactly;line-height:36px;">${p.heading}</td>
               </tr>
               <tr>
-                <td class="pad" style="padding:16px 40px 0 40px;font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#C9BFCC;mso-line-height-rule:exactly;line-height:25px;">Click the link below to set a new password. This link expires in 15 minutes.</td>
+                <td class="pad" style="padding:16px 40px 0 40px;font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#C9BFCC;mso-line-height-rule:exactly;line-height:25px;">${p.intro}</td>
               </tr>
 
               <!-- Button -->
@@ -119,9 +117,9 @@ async function sendPasswordResetEmail(toEmail, resetToken) {
                   <table role="presentation" cellpadding="0" cellspacing="0" border="0">
                     <tbody><tr>
                       <td align="center" bgcolor="#F2A05C" style="background-color:#F2A05C;border-radius:14px;">
-                        <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${resetUrl}" style="height:52px;v-text-anchor:middle;width:240px;" arcsize="27%" stroke="f" fillcolor="#F2A05C"><center style="color:#17111B;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">Set a new password</center></v:roundrect><![endif]-->
+                        <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${p.url}" style="height:52px;v-text-anchor:middle;width:240px;" arcsize="27%" stroke="f" fillcolor="#F2A05C"><center style="color:#17111B;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">${p.buttonLabel}</center></v:roundrect><![endif]-->
                         <!--[if !mso]><!-->
-                        <a href="${resetUrl}" target="_blank" style="display:block;padding:16px 32px;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:bold;color:#17111B;text-decoration:none;border-radius:14px;mso-line-height-rule:exactly;line-height:20px;">Set a new password</a>
+                        <a href="${p.url}" target="_blank" style="display:block;padding:16px 32px;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:bold;color:#17111B;text-decoration:none;border-radius:14px;mso-line-height-rule:exactly;line-height:20px;">${p.buttonLabel}</a>
                         <!--<![endif]-->
                       </td>
                     </tr>
@@ -134,7 +132,7 @@ async function sendPasswordResetEmail(toEmail, resetToken) {
                 <td class="pad" style="padding:20px 40px 0 40px;">
                   <table role="presentation" cellpadding="0" cellspacing="0" border="0">
                     <tbody><tr>
-                      <td bgcolor="#2A2130" style="background-color:#2A2130;border-radius:999px;padding:7px 14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#F2A05C;mso-line-height-rule:exactly;line-height:18px;">Expires in 15 minutes</td>
+                      <td bgcolor="#2A2130" style="background-color:#2A2130;border-radius:999px;padding:7px 14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#F2A05C;mso-line-height-rule:exactly;line-height:18px;">${p.expiryLabel}</td>
                     </tr>
                   </tbody></table>
                 </td>
@@ -153,12 +151,12 @@ async function sendPasswordResetEmail(toEmail, resetToken) {
               </tr>
               <tr>
                 <td class="pad" style="padding:8px 40px 0 40px;font-family:'Courier New',Courier,monospace;font-size:13px;mso-line-height-rule:exactly;line-height:20px;word-break:break-all;">
-                  <a href="${resetUrl}" target="_blank" style="color:#F2A05C;text-decoration:underline;word-break:break-all;">${resetUrl}</a>
+                  <a href="${p.url}" target="_blank" style="color:#F2A05C;text-decoration:underline;word-break:break-all;">${p.url}</a>
                 </td>
               </tr>
 
               <tr>
-                <td class="pad" style="padding:24px 40px 44px 40px;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#C9BFCC;mso-line-height-rule:exactly;line-height:22px;">If you did not request this, you can safely ignore this email.</td>
+                <td class="pad" style="padding:24px 40px 44px 40px;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#C9BFCC;mso-line-height-rule:exactly;line-height:22px;">${p.ignoreNote}</td>
               </tr>
             </tbody></table>
           </td>
@@ -171,7 +169,48 @@ async function sendPasswordResetEmail(toEmail, resetToken) {
   </tr>
 </tbody></table>
 
-</body>`,
+</body>`;
+}
+
+async function sendPasswordResetEmail(toEmail, resetToken) {
+  const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
+
+  await getNoreplyTransporter().sendMail({
+    from: NOREPLY_EMAIL_FROM,
+    to: toEmail,
+    subject: 'Reset your GuessWord password',
+    html: actionEmailHtml({
+      preheader: 'Set a new password for GuessWord. This link expires in 15 minutes.',
+      eyebrow: 'Password reset',
+      heading: 'You requested a password reset.',
+      intro: 'Click the link below to set a new password. This link expires in 15 minutes.',
+      buttonLabel: 'Set a new password',
+      url: resetUrl,
+      expiryLabel: 'Expires in 15 minutes',
+      ignoreNote: 'If you did not request this, you can safely ignore this email.',
+    }),
+  });
+}
+
+// Link to the frontend's /verify-email/:token page, which calls
+// POST /api/verification/email/confirm with the token.
+async function sendEmailVerificationEmail(toEmail, token) {
+  const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email/${token}`;
+
+  await getNoreplyTransporter().sendMail({
+    from: NOREPLY_EMAIL_FROM,
+    to: toEmail,
+    subject: 'Verify your GuessWord email',
+    html: actionEmailHtml({
+      preheader: 'Confirm this is your email address. This link expires in 24 hours.',
+      eyebrow: 'Email verification',
+      heading: 'Confirm your email address.',
+      intro: 'Click the link below to confirm this email address belongs to you. This link expires in 24 hours.',
+      buttonLabel: 'Verify my email',
+      url: verifyUrl,
+      expiryLabel: 'Expires in 24 hours',
+      ignoreNote: 'If you did not ask for this, you can safely ignore this email.',
+    }),
   });
 }
 
@@ -255,6 +294,7 @@ async function sendContactDigestEmail({ to, subject, rangeLabel, submissions }) 
 
 module.exports = {
   sendPasswordResetEmail,
+  sendEmailVerificationEmail,
   sendContactNotificationEmail,
   sendContactDigestEmail,
 };
