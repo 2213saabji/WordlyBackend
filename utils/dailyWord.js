@@ -1,7 +1,35 @@
+const crypto = require('crypto');
 const { ANSWERS, INFINITE_ANSWERS } = require('../data/words');
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
+}
+
+// --- IST day keys. Infinite mode's day (tiers, active time, qualifying days)
+// runs 00:00-23:59 IST; Daily mode keeps the UTC todayKey() above.
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+
+function istDayKey(date = new Date()) {
+  return new Date(date.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+// 'YYYY-MM-DD' + n days (n may be negative). Pure calendar math, no timezone.
+function addDaysKey(dateKey, n) {
+  const [y, m, d] = String(dateKey).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+
+// The instant an IST day starts (00:00 IST), as a Date.
+function istDayStart(dateKey) {
+  const [y, m, d] = String(dateKey).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d) - IST_OFFSET_MS);
+}
+
+// Whole days from a to b (b - a) for two 'YYYY-MM-DD' keys.
+function diffDaysKey(a, b) {
+  const [ay, am, ad] = String(a).split('-').map(Number);
+  const [by, bm, bd] = String(b).split('-').map(Number);
+  return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86400000);
 }
 
 function isConsecutiveDay(previousDateKey, currentDateKey) {
@@ -92,6 +120,17 @@ function seedFromString(str) {
   return hash;
 }
 
+// userId is public (it's in leaderboard responses), so a seed derived from it
+// alone lets anyone with this file predict a player's next infinite word -
+// which matters once Tier 1 pays out. With INFINITE_SEED_SECRET set, the seed
+// is an HMAC of the userId instead. Setting it reshuffles every existing
+// user's order once; without it, the legacy seed is kept.
+function infiniteSeed(key) {
+  const secret = process.env.INFINITE_SEED_SECRET;
+  if (!secret) return seedFromString(key);
+  return crypto.createHmac('sha256', secret).update(key).digest().readUInt32BE(0);
+}
+
 // A fixed pseudo-random ordering of INFINITE_ANSWERS, one per user, seeded
 // from their id so it's reproducible without persisting anything. Cached in
 // memory per process, same pattern as answerOrder() above.
@@ -100,7 +139,7 @@ function infiniteAnswerOrder(userId) {
   const key = String(userId);
   if (infiniteOrderCache.has(key)) return infiniteOrderCache.get(key);
   const idx = INFINITE_ANSWERS.map((_, i) => i);
-  const rand = mulberry32(seedFromString(key));
+  const rand = mulberry32(infiniteSeed(key));
   for (let i = idx.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
     [idx[i], idx[j]] = [idx[j], idx[i]];
@@ -125,6 +164,10 @@ function infiniteWordForRound(userId, roundIndex) {
 
 module.exports = {
   todayKey,
+  istDayKey,
+  addDaysKey,
+  istDayStart,
+  diffDaysKey,
   isConsecutiveDay,
   wordForDate,
   wordForDateLegacy,

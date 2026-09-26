@@ -1,6 +1,9 @@
 const Game = require('../models/Game');
+const TierMembership = require('../models/TierMembership');
 const { todayKey } = require('../utils/dailyWord');
 const { getWeekRange, rankDailyEntries, rankWeeklyEntries, paginate, parsePagination } = require('../utils/leaderboard');
+const { getTierConfig, tierDef } = require('../utils/tierConfig');
+const { loadSettledMembership, rankOf, BOARD_SORT } = require('../utils/tiers');
 
 async function daily(req, res) {
   const date = typeof req.query.date === 'string' ? req.query.date : todayKey();
@@ -37,4 +40,58 @@ async function weekly(req, res) {
   return res.json({ week: { start, end }, leaderboard: items, pagination });
 }
 
-module.exports = { daily, weekly };
+// GET /leaderboard/infinite?tier=4&page=1&limit=20 — one tier's board.
+// Unlike daily/weekly this is sorted and paged in the database (the board
+// is every Infinite player, not one day's games), and each rank is
+// skip + position on the same index rankOf() counts over.
+async function infinite(req, res) {
+  const config = await getTierConfig();
+  const mine = await loadSettledMembership(req.userId, config);
+
+  let tier = mine ? mine.tier : 8;
+  if (req.query.tier !== undefined) {
+    tier = Number(req.query.tier);
+    if (!Number.isInteger(tier) || tier < 1 || tier > 8) {
+      return res.status(400).json({ message: 'tier must be an integer from 1 to 8', code: 'INVALID_TIER' });
+    }
+  }
+
+  const { page: requestedPage, limit } = parsePagination(req.query);
+  const total = await TierMembership.countDocuments({ tier });
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const page = Math.min(requestedPage, totalPages);
+  const skip = (page - 1) * limit;
+
+  const members = await TierMembership.find({ tier })
+    .sort(BOARD_SORT)
+    .skip(skip)
+    .limit(limit)
+    .select('user score qualifyingDaysInTier stickDays')
+    .populate('user', 'username')
+    .lean();
+
+  const inThisTier = Boolean(mine && mine.tier === tier);
+  return res.json({
+    tier,
+    tierName: tierDef(config, tier).name,
+    leaderboard: members.map((m, i) => ({
+      rank: skip + i + 1,
+      // A membership can outlive its user (account deleted) — keep the row
+      // so ranks stay contiguous, just without a name.
+      userId: m.user ? m.user._id : null,
+      username: m.user ? m.user.username : null,
+      score: m.score,
+      qualifyingDaysInTier: m.qualifyingDaysInTier,
+      stickDays: m.stickDays,
+    })),
+    me: {
+      rank: inThisTier ? await rankOf(mine) : null,
+      score: mine ? mine.score : 0,
+      qualifyingDaysInTier: mine ? mine.qualifyingDaysInTier : 0,
+      inThisTier,
+    },
+    pagination: { page, limit, total, totalPages },
+  });
+}
+
+module.exports = { daily, weekly, infinite };

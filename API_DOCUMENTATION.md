@@ -153,8 +153,22 @@ Returns up to the last 30 days of the caller's games, newest first, same shape a
 { "games": [ { "date": "...", "status": "won", ... }, ... ] }
 ```
 
-### Infinite mode (`/game/infinite/current`, `/game/infinite/new`, `/game/infinite/guess`, `/game/infinite/history`)
-Same `game` shape and semantics as daily mode above (`mode: "infinite"` instead of `"daily"`), including `difficulty` (`"easy" | "medium" | "hard"`) and `hint`.
+### Infinite mode (`/game/infinite/current`, `/game/infinite/new`, `/game/infinite/guess`, `/game/infinite/hint`, `/game/infinite/history`)
+Same `game` shape and semantics as daily mode above (`mode: "infinite"` instead of `"daily"`), with these differences for the tier leaderboard (see [section 6](#6-infinite-tier-leaderboard)):
+- **`hint` is not included while the game is in progress** unless the player revealed it with `POST /game/infinite/hint`. It's included once the game ends.
+- **`difficulty` is not included while the game is in progress.** It's included once the game ends.
+- Extra fields: `hintsEnabled` (the player's current tier allows hints), `hintRevealed`, `pointsAwarded`, `countedDay` (IST day the game counted toward), `tierAtCompletion`.
+- `date` is the IST day the game started.
+- `POST /game/infinite/guess`: when the guess ends the game, the response also has a `tier` block:
+  ```json
+  { "result": [1,1,0,-1,1], "game": { "...": "..." },
+    "tier": { "pointsAwarded": 16, "qualifyingBonusAwarded": 20, "score": 632, "rank": 14, "tierSize": 212,
+              "today": { "day": "2026-09-26", "activeMinutes": 41, "targetMinutes": 35, "gamesCompleted": 12,
+                         "targetGames": 12, "qualified": true, "completionRatio": 1, "resetsAt": "2026-09-26T18:30:00.000Z" } } }
+  ```
+  Optional body field `deviceId` is stored for anti-abuse checks.
+- `POST /game/infinite/new` (skip): a round abandoned **after at least one guess** counts as a completed loss (0 points). A round abandoned before any guess doesn't count. The response adds `today` (same shape as above).
+- `POST /game/infinite/hint`: `200 { "hint": "..." }` in Tiers 7–8. `403 { "message": "Hints are disabled in your tier", "code": "HINTS_DISABLED_FOR_TIER" }` in Tiers 1–6. `400` if no game is in progress.
 
 ### How stats update
 After a game finishes (win or loss), `user.stats` changes automatically — refetch `/auth/me` (or use the `user` object returned by the next login) to get fresh values:
@@ -322,6 +336,72 @@ Response `201`:
 Errors: `400` on any missing/invalid field (see the message for which one).
 
 **What happens server-side** (informational, not something the frontend needs to orchestrate): the submission is stored, and an immediate notification email goes to the support inbox. Separately, backend-only scheduled jobs compile a daily and a weekly digest of all stored submissions and email them out, clearing the week's data after the weekly digest sends. None of that requires anything from the frontend beyond this one `POST` call.
+
+---
+
+## 6. Infinite tier leaderboard
+
+All authenticated. Full rules are in `docs/INFINITE_TIERS_BACKEND_CONTRACT.md`. In short: 8 tiers (1 Diamond … 8 Stone). Every player starts in Tier 8 on their first completed Infinite game. A day **qualifies** when the player meets their tier's active-minutes and games-completed targets. Each qualifying day adds 1 to the tier's day counter (`stickDays`). When it reaches the tier's `daysToStick`, the player moves up that night. A missed day resets the counter, and 3 misses in any 7 days moves the player down (Tiers 1–7). Days run 00:00–23:59 **IST**. Tier moves happen only at 00:00 IST.
+
+### `GET /auth/me` (addition)
+Now also returns `"infinite": { "tier": 4, "tierName": "Silver" }` for a header badge.
+
+### `GET /infinite/tiers`
+Tier table and scoring rules.
+```json
+{ "version": 0,
+  "tiers": [ { "tier": 1, "name": "Diamond", "hintsEnabled": false, "minActiveMinutes": 60,
+               "minGamesCompleted": 20, "daysToStick": 30, "rewardInr": 100 }, "..." ],
+  "scoring": { "solveBase": 10, "perUnusedGuess": 2, "qualifyingDayBonus": 20 },
+  "demotion": { "misses": 3, "windowDays": 7 }, "resetTimeIst": "00:00" }
+```
+
+### `GET /infinite/me`
+The player's tier status and today's progress card.
+```json
+{ "tier": 4, "tierName": "Silver", "hintsEnabled": false,
+  "score": 632, "rank": 14, "tierSize": 212, "qualifyingDaysInTier": 9, "consistencyPercent": 82,
+  "counter": { "stickDays": 5, "daysToStick": 14, "daysLeft": 9, "resetsOnEntry": true },
+  "demotion": { "missesInWindow": 1, "limit": 3, "atRisk": false, "window": [ { "day": "2026-09-20", "qualified": true } ] },
+  "today": { "day": "2026-09-26", "activeMinutes": 18, "targetMinutes": 25, "gamesCompleted": 6, "targetGames": 9,
+             "qualified": false, "completionRatio": 0.69, "resetsAt": "2026-09-26T18:30:00.000Z" },
+  "lastChange": { "fromTier": 5, "toTier": 4, "reason": "promotion", "oldRank": 12, "rankAtEntry": 28, "day": "2026-09-17" },
+  "reward": null }
+```
+Before the first completed game: Tier 8 defaults with `rank: null`. `reward` is filled only in Tier 1 (same shape as `GET /rewards/me`).
+
+### `POST /infinite/activity/heartbeat`
+Send every **15 s** while an Infinite game screen is visible and the player has given input in the last 60 s. The server decides how much time to credit: it only counts time on a visible screen, with recent input, and a guess or game start in the last 3 minutes. Beats less than 10 s apart are ignored.
+```json
+// request
+{ "gameId": "66f…", "visible": true, "lastInputAgoMs": 4200, "deviceId": "d-…" }
+// response
+{ "creditedMs": 15012, "today": { "day": "2026-09-26", "activeMinutes": 19, "targetMinutes": 25, "gamesCompleted": 6, "targetGames": 9, "qualified": false } }
+```
+Every guess also counts as a heartbeat.
+
+### `GET /leaderboard/infinite?tier=4&page=1&limit=20`
+One tier's board. `tier` defaults to the caller's own. Order: score, then qualifying days in tier, then who reached the score first.
+```json
+{ "tier": 4, "tierName": "Silver",
+  "leaderboard": [ { "rank": 1, "userId": "…", "username": "asha", "score": 2104, "qualifyingDaysInTier": 31, "stickDays": 12 } ],
+  "me": { "rank": 14, "score": 632, "qualifyingDaysInTier": 9, "inThisTier": true },
+  "pagination": { "page": 1, "limit": 20, "total": 212, "totalPages": 11 } }
+```
+`me` is always present (for the pinned row). It has `inThisTier: false` and `rank: null` when viewing another tier. `400 INVALID_TIER` if `tier` isn't 1–8.
+
+### `GET /infinite/tier-changes?page=1`
+The player's promotions and demotions, newest first: `{ "changes": [ { "fromTier", "toTier", "reason", "oldScore", "oldRank", "oldTierSize", "carriedScore", "rankAtEntry", "newTierSize", "day", "createdAt" } ], "pagination": { … } }`.
+
+### `GET /notifications?unread=true&page=1` · `POST /notifications/read`
+```json
+{ "notifications": [ { "id": "…", "type": "promotion", "data": { "fromTier": 5, "toTier": 4, "oldRank": 12, "rankAtEntry": 28 }, "read": false, "createdAt": "…" } ],
+  "unreadCount": 3, "pagination": { … } }
+```
+Types: `promotion`, `demotion_risk` (2 misses in the window), `demotion`, `reward_earned`. Mark as read with `{ "ids": ["…"] }` (max 100), which returns `{ "updated": 2 }`.
+
+### `GET /rewards/me`
+Tier 1 reward cycle: `{ "enabled": false, "inTier1": true, "day": 17, "of": 30, "amountInr": 100, "verificationComplete": false, "blockedReason": null, "payouts": [ { "cycle", "amountInr", "status", "eligibleDay", "paidAt" } ] }`. Rewards are off in Phase 1 (`enabled: false`): the Tier 1 counter still cycles at 30, but no payout is created.
 
 ---
 
