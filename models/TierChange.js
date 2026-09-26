@@ -15,6 +15,11 @@ const tierChangeSchema = new mongoose.Schema(
     carriedScore: { type: Number, default: 0 },
     rankAtEntry: { type: Number, default: null },
     newTierSize: { type: Number, default: null },
+    // Snapshot of the old tier's last <=7 settled days when the move happened.
+    window: {
+      type: [new mongoose.Schema({ day: String, qualified: Boolean }, { _id: false })],
+      default: [],
+    },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

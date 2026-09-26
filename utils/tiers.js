@@ -299,6 +299,7 @@ async function settleMembership(initial, config, uptoDay = yesterdayIst()) {
     window: m.window.map((w) => ({ day: w.day, qualified: w.qualified })),
     missesInWindow: m.missesInWindow,
     rewardCycle: m.rewardCycle,
+    completedCycles: (m.completedCycles || []).map((c) => ({ cycle: c.cycle, day: c.day })),
   };
 
   async function flush(day, extra = {}, extraFilter = {}) {
@@ -343,8 +344,14 @@ async function settleMembership(initial, config, uptoDay = yesterdayIst()) {
 
       const [rankAtEntry, newTierSize] = await Promise.all([rankOf(updated), tierSize(toTier)]);
       const change = { fromTier, toTier, reason, oldScore: fresh.score, oldRank, oldTierSize, carriedScore, rankAtEntry, newTierSize };
-      await TierChange.create({ user: m.user, day, ...change });
+      // The old tier's window, including the day that triggered the move.
+      await TierChange.create({ user: m.user, day, ...change, window: before.window });
       await notify(m.user, reason, change);
+      // Verification is only for payouts, so only prompt for it while
+      // rewards are switched on.
+      if (reason === 'promotion' && toTier === 1 && config.rewardsEnabled) {
+        await notify(m.user, 'verification_needed', { tier: 1 });
+      }
       stats[reason === 'promotion' ? 'promoted' : 'demoted'] += 1;
       m = updated;
       return;
@@ -375,6 +382,9 @@ async function settleMembership(initial, config, uptoDay = yesterdayIst()) {
           }
         }
         state.rewardCycle = cycle;
+        if (!state.completedCycles.some((c) => c.cycle === cycle)) {
+          state.completedCycles = [...state.completedCycles, { cycle, day }];
+        }
         state.stickDays = 0;
         const updated = await flush(day);
         if (!updated) throw new SettleConflict();

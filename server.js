@@ -15,6 +15,7 @@ const cronRoutes = require('./routes/cronRoutes');
 const infiniteRoutes = require('./routes/infiniteRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const rewardRoutes = require('./routes/rewardRoutes');
+const verificationRoutes = require('./routes/verificationRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 8888;
@@ -90,6 +91,7 @@ app.use('/api/cron', cronRoutes);
 app.use('/api/infinite', infiniteRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/rewards', rewardRoutes);
+app.use('/api/verification', verificationRoutes);
 
 // 404 handler
 app.use((req, res) => {

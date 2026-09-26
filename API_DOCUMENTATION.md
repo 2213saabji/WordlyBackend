@@ -157,7 +157,7 @@ Returns up to the last 30 days of the caller's games, newest first, same shape a
 Same `game` shape and semantics as daily mode above (`mode: "infinite"` instead of `"daily"`), with these differences for the tier leaderboard (see [section 6](#6-infinite-tier-leaderboard)):
 - **`hint` while the game is in progress:** included in Tiers 7–8 (same as today), and **not included in Tiers 1–6**. It's included for every tier once the game ends.
 - **`difficulty` is not included while the game is in progress.** It's included once the game ends.
-- Extra fields: `hintsEnabled` (the player's current tier allows hints), `hintRevealed`, `pointsAwarded`, `countedDay` (IST day the game counted toward), `tierAtCompletion`.
+- Extra fields: `id` (the round id — send it as `gameId` in heartbeats; also present on daily games), `hintsEnabled` (the player's current tier allows hints), `hintRevealed`, `pointsAwarded`, `countedDay` (IST day the game counted toward), `tierAtCompletion`.
 - `date` is the IST day the game started.
 - `POST /game/infinite/guess`: when the guess ends the game, the response also has a `tier` block:
   ```json
@@ -344,16 +344,16 @@ Errors: `400` on any missing/invalid field (see the message for which one).
 All authenticated. Full rules are in `docs/INFINITE_TIERS_BACKEND_CONTRACT.md`. In short: 8 tiers (1 Diamond … 8 Stone). Every player starts in Tier 8 on their first completed Infinite game. A day **qualifies** when the player meets their tier's active-minutes and games-completed targets. Each qualifying day adds 1 to the tier's day counter (`stickDays`). When it reaches the tier's `daysToStick`, the player moves up that night. A missed day resets the counter, and 3 misses in any 7 days moves the player down (Tiers 1–7). Days run 00:00–23:59 **IST**. Tier moves happen only at 00:00 IST.
 
 ### `GET /auth/me` (addition)
-Now also returns `"infinite": { "tier": 4, "tierName": "Silver" }` for a header badge.
+Now always returns `"infinite": { "tier": 4, "tierName": "Silver" }` for a header badge. Before the player's first completed Infinite game this is `{ "tier": 8, "tierName": "Stone" }`.
 
 ### `GET /infinite/tiers`
-Tier table and scoring rules.
+**Public** (no login needed). Tier table and scoring rules.
 ```json
 { "version": 0,
   "tiers": [ { "tier": 1, "name": "Diamond", "hintsEnabled": false, "minActiveMinutes": 60,
                "minGamesCompleted": 20, "daysToStick": 30, "rewardInr": 100 }, "..." ],
   "scoring": { "solveBase": 10, "perUnusedGuess": 2, "qualifyingDayBonus": 20 },
-  "demotion": { "misses": 3, "windowDays": 7 }, "resetTimeIst": "00:00" }
+  "demotion": { "misses": 3, "windowDays": 7 }, "carryInPercent": 20, "resetTimeIst": "00:00" }
 ```
 
 ### `GET /infinite/me`
@@ -365,7 +365,9 @@ The player's tier status and today's progress card.
   "demotion": { "missesInWindow": 1, "limit": 3, "atRisk": false, "window": [ { "day": "2026-09-20", "qualified": true } ] },
   "today": { "day": "2026-09-26", "activeMinutes": 18, "targetMinutes": 25, "gamesCompleted": 6, "targetGames": 9,
              "qualified": false, "completionRatio": 0.69, "resetsAt": "2026-09-26T18:30:00.000Z" },
-  "lastChange": { "fromTier": 5, "toTier": 4, "reason": "promotion", "oldRank": 12, "rankAtEntry": 28, "day": "2026-09-17" },
+  "lastChange": { "fromTier": 5, "toTier": 4, "reason": "promotion", "oldScore": 1450, "oldRank": 12, "oldTierSize": 60,
+                  "carriedScore": 290, "rankAtEntry": 28, "newTierSize": 212, "window": [ … ], "day": "2026-09-17", "createdAt": "…" },
+  "completedCycles": [ { "cycle": 1, "day": "2026-08-30" } ],
   "reward": null }
 ```
 Before the first completed game: Tier 8 defaults with `rank: null`. `reward` is filled only in Tier 1 (same shape as `GET /rewards/me`).
@@ -381,27 +383,125 @@ Send every **15 s** while an Infinite game screen is visible and the player has 
 Every guess also counts as a heartbeat.
 
 ### `GET /leaderboard/infinite?tier=4&page=1&limit=20`
-One tier's board. `tier` defaults to the caller's own. Order: score, then qualifying days in tier, then who reached the score first.
+**Public** (no login needed). One tier's board. `tier` defaults to the caller's own, or 8 when signed out. Order: score, then qualifying days in tier, then who reached the score first.
 ```json
 { "tier": 4, "tierName": "Silver",
   "leaderboard": [ { "rank": 1, "userId": "…", "username": "asha", "score": 2104, "qualifyingDaysInTier": 31, "stickDays": 12 } ],
-  "me": { "rank": 14, "score": 632, "qualifyingDaysInTier": 9, "inThisTier": true },
+  "me": { "rank": 14, "score": 632, "qualifyingDaysInTier": 9, "stickDays": 5, "tier": 4, "inThisTier": true },
   "pagination": { "page": 1, "limit": 20, "total": 212, "totalPages": 11 } }
 ```
-`me` is always present (for the pinned row). It has `inThisTier: false` and `rank: null` when viewing another tier. `400 INVALID_TIER` if `tier` isn't 1–8.
+`me` is the pinned row: `null` when signed out; for a signed-in player viewing another tier it has `inThisTier: false` and `rank: null`. A present but invalid/expired token still gets `401`. `400 INVALID_TIER` if `tier` isn't 1–8.
 
 ### `GET /infinite/tier-changes?page=1`
-The player's promotions and demotions, newest first: `{ "changes": [ { "fromTier", "toTier", "reason", "oldScore", "oldRank", "oldTierSize", "carriedScore", "rankAtEntry", "newTierSize", "day", "createdAt" } ], "pagination": { … } }`.
+The player's promotions and demotions, newest first: `{ "changes": [ { "fromTier", "toTier", "reason", "oldScore", "oldRank", "oldTierSize", "carriedScore", "rankAtEntry", "newTierSize", "window", "day", "createdAt" } ], "pagination": { "page", "limit", "total", "totalPages" } }`. `window` is the old tier's last ≤7 days (`{ day, qualified }`) at the moment of the move, e.g. the missed days behind a demotion. It's empty for moves logged before this field existed.
 
 ### `GET /notifications?unread=true&page=1` · `POST /notifications/read`
 ```json
 { "notifications": [ { "id": "…", "type": "promotion", "data": { "fromTier": 5, "toTier": 4, "oldRank": 12, "rankAtEntry": 28 }, "read": false, "createdAt": "…" } ],
   "unreadCount": 3, "pagination": { … } }
 ```
-Types: `promotion`, `demotion_risk` (2 misses in the window), `demotion`, `reward_earned`. Mark as read with `{ "ids": ["…"] }` (max 100), which returns `{ "updated": 2 }`.
+Types sent today and their `data`:
+- `promotion`, `demotion`: `fromTier`, `toTier`, `reason`, `oldScore`, `oldRank`, `oldTierSize`, `carriedScore`, `rankAtEntry`, `newTierSize`.
+- `demotion_risk` (2 misses in the window): `tier`, `missesInWindow`, `limit`.
+- `reward_earned` (only when rewards are on): `cycle`, `amountInr`, `day`.
+- `verification_needed` (on promotion to Tier 1, only when rewards are on): `tier`.
+
+`payout_sent` and `payout_failed` are reserved and not sent yet. Mark as read with `{ "ids": ["…"] }` (max 100), which returns `{ "updated": 2 }`.
 
 ### `GET /rewards/me`
-Tier 1 reward cycle: `{ "enabled": false, "inTier1": true, "day": 17, "of": 30, "amountInr": 100, "verificationComplete": false, "blockedReason": null, "payouts": [ { "cycle", "amountInr", "status", "eligibleDay", "paidAt" } ] }`. Rewards are off in Phase 1 (`enabled: false`): the Tier 1 counter still cycles at 30, but no payout is created.
+Tier 1 reward cycle: `{ "enabled": false, "inTier1": true, "day": 17, "of": 30, "amountInr": 100, "verificationComplete": false, "blockedReason": "verification_pending", "payouts": [ { "cycle", "amountInr", "status", "eligibleDay", "paidAt" } ] }`.
+- `verificationComplete`: all three verification steps are `verified`.
+- `blockedReason`: `"review_case"` (a detail is linked to another account, see section 7), `"verification_pending"` (a step isn't verified yet), or `null`.
+- Rewards are off for now (`enabled: false`): the Tier 1 counter still cycles at 30, but no payout is created.
+
+---
+
+## 7. Tier 1 verification
+
+Verification is only for the Diamond (Tier 1) ₹100 reward. It isn't part of login, signup or password reset. The player verifies three details, in this order: **mobile → email → bank**. The flow can be left and resumed at any time, because the server keeps each step's state.
+
+**Who can call it:** signed-in players in Tier 1, or players with a payout that hasn't been paid yet. Anyone else gets `403 { "code": "TIER1_REQUIRED" }`. The one exception is `POST /verification/email/confirm`, which needs no login (see below).
+
+**The status object.** `GET /verification/status` returns it, and so does every step endpoint below after it finishes. Re-render the verification screen from it each time.
+```json
+{
+  "mobile": { "status": "verified", "masked": "+•••••••2671" },
+  "email":  { "status": "pending", "masked": "as••@example.com", "method": "link" },
+  "bank":   { "status": "not_started", "masked": null, "ifsc": null, "nameMatch": null },
+  "reviewCase": null,
+  "nextStep": "email",
+  "complete": false
+}
+```
+
+| Field | Values | Meaning |
+|---|---|---|
+| `mobile.status` | `not_started` · `pending` · `verified` | `pending` = a code was sent and is waiting to be entered |
+| `email.status` | `not_started` · `pending` · `verified` | `pending` = a link was emailed and hasn't been clicked yet |
+| `email.method` | `link` · `google` · `null` | `google` = passed automatically because the account signs in with Google |
+| `bank.status` | `not_started` · `pending` · `verified` · `name_mismatch` | `pending` = submitted, waiting for the bank check. `name_mismatch` = the name didn't match the bank's records, so ask the player to re-enter it |
+| `masked` | string or `null` | The only form in which a phone number, email or account number is ever returned |
+| `reviewCase` | `{ "status": "open", "reason": "identity_in_use", "detail": "phone" \| "email" \| "bank" }` or `null` | A detail is already linked to another GuessWord account. The step still shows `verified` and the player keeps their tier, but payouts are held for manual review. Show a "your payout is on hold for review" message |
+| `nextStep` | `mobile` · `email` · `bank` · `null` | The step to show next. `null` means nothing is needed from the player right now (all done, or the bank check is still running) |
+| `complete` | boolean | All three steps are `verified` |
+
+### Step 1 · Mobile number
+
+> **Not live yet:** no SMS provider has been chosen, so `POST /verification/mobile/otp` currently returns `503 { "code": "SMS_PROVIDER_NOT_CONFIGURED" }`. Show "Mobile verification is coming soon" for that code. Everything else in this step is built, and starts working as soon as a provider is plugged in on the backend. The frontend won't need any changes then.
+
+**`POST /verification/mobile/otp`** `{ "phone": "+14155552671" }` sends a 6-digit code by SMS.
+- **Numbers from any country are accepted**, in international (E.164) format: `+`, country code, then the number. Spaces, dashes, dots and brackets are removed first, so `+1 (415) 555-2671` is fine. A number without the `+` country code gets `400 PHONE_INVALID`.
+- The code expires in **10 minutes**, and the response includes `"expiresInSeconds": 600`. The step becomes `pending`.
+- **Limit: 3 codes per 15 minutes.** The 4th gets `429 { "code": "OTP_RATE_LIMITED", "retryAfterSeconds": 540 }`.
+- Requesting a code for a *different* number sets the step back to `pending` until the new number is confirmed.
+- If the number is already verified, the response is `200` with `"message": "This number is already verified"`, and no SMS is sent.
+
+**`POST /verification/mobile/verify`** `{ "phone": "+14155552671", "code": "123456" }` confirms the code.
+- Send the same number the code was requested for. A code only works for that number.
+- A wrong or expired code gets `400 { "code": "OTP_INVALID" }`. After **5 wrong tries** the code stops working, and the player has to request a new one.
+- On success the step becomes `verified`.
+
+### Step 2 · Email
+
+The email address is always the one on the player's account. The player doesn't type it.
+
+**`POST /verification/email/send`** (no body) emails a verification link.
+- The link is **`https://www.guessword.games/verify-email/<token>`** and expires in **24 hours**. The response includes `"expiresInSeconds": 86400`, and the step becomes `pending`.
+- Resending is allowed once a minute. Sooner gets `429 { "code": "EMAIL_RATE_LIMITED", "retryAfterSeconds": 42 }`. A resend makes the previous link stop working.
+- If the email can't be sent: `502 { "code": "EMAIL_SEND_FAILED" }`. It's safe to retry straight away.
+- **Google sign-in accounts skip this step.** Their email is marked `verified` (`method: "google"`) the first time status is loaded, and no email is sent.
+
+**`POST /verification/email/confirm`** `{ "token": "<token from the link>" }` needs **no login**.
+- The frontend's `/verify-email/:token` page should call it on load. The player may open the link on a device where they aren't signed in, which is why no login is needed.
+- Success: `200 { "message": "Email verified", "email": { "status": "verified", "masked": "as••@example.com" } }`.
+- Invalid, expired or already-used link: `400 { "code": "VERIFICATION_TOKEN_INVALID" }`. Offer a "send a new link" button, which needs the player to be signed in.
+
+### Step 3 · Bank account
+
+**`POST /verification/bank`** `{ "accountHolderName": "Asha Rao", "accountNumber": "123456789012", "ifsc": "HDFC0001234" }`
+- **Validation (400):**
+  - `BANK_NAME_INVALID`: the name must be 2–100 characters.
+  - `BANK_ACCOUNT_INVALID`: the account number must be 9–18 digits (spaces are removed first).
+  - `IFSC_INVALID`: the IFSC must be 11 characters, 4 letters then `0` then 6 letters or digits. It's case-insensitive.
+- Details are stored encrypted. Only `masked` (`••••9012`) and the IFSC are ever returned.
+- After submitting, the step is `pending` while the bank check (penny-drop) runs. It then becomes `verified`, or `name_mismatch` if the name doesn't match the bank's records.
+- **Not live yet:** no penny-drop provider has been chosen, so a submitted account currently stays `pending`. `nextStep` is `null` at that point, so show "we're checking your bank details".
+- **Resubmitting** (to change the account, or fix a name mismatch) restarts the step at `pending`. That holds the current cycle's payout until the new account is verified.
+
+### Error codes (verification)
+
+| Code | HTTP | When |
+|---|---|---|
+| `TIER1_REQUIRED` | 403 | Not in Tier 1 and no unpaid payout |
+| `PHONE_INVALID` | 400 | Not an international (E.164) number |
+| `OTP_RATE_LIMITED` | 429 | More than 3 codes in 15 minutes (`retryAfterSeconds` included) |
+| `OTP_INVALID` | 400 | Wrong, expired or used code, or 5 wrong tries |
+| `SMS_PROVIDER_NOT_CONFIGURED` | 503 | Mobile verification isn't live yet |
+| `OTP_SEND_FAILED` | 502 | The SMS provider failed; retry |
+| `EMAIL_RATE_LIMITED` | 429 | Link resent within a minute (`retryAfterSeconds` included) |
+| `EMAIL_SEND_FAILED` | 502 | The email couldn't be sent; retry |
+| `VERIFICATION_TOKEN_INVALID` | 400 | Bad, expired or already-used email link |
+| `BANK_NAME_INVALID` · `BANK_ACCOUNT_INVALID` · `IFSC_INVALID` | 400 | Bank form validation |
 
 ---
 

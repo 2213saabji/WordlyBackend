@@ -41,12 +41,13 @@ async function weekly(req, res) {
 }
 
 // GET /leaderboard/infinite?tier=4&page=1&limit=20 — one tier's board.
-// Unlike daily/weekly this is sorted and paged in the database (the board
-// is every Infinite player, not one day's games), and each rank is
-// skip + position on the same index rankOf() counts over.
+// Public (optionalAuth): signed-out visitors get `me: null`, and `tier`
+// defaults to 8 for them. Unlike daily/weekly this is sorted and paged in
+// the database (the board is every Infinite player, not one day's games),
+// and each rank is skip + position on the same index rankOf() counts over.
 async function infinite(req, res) {
   const config = await getTierConfig();
-  const mine = await loadSettledMembership(req.userId, config);
+  const mine = req.userId ? await loadSettledMembership(req.userId, config) : null;
 
   let tier = mine ? mine.tier : 8;
   if (req.query.tier !== undefined) {
@@ -84,12 +85,16 @@ async function infinite(req, res) {
       qualifyingDaysInTier: m.qualifyingDaysInTier,
       stickDays: m.stickDays,
     })),
-    me: {
-      rank: inThisTier ? await rankOf(mine) : null,
-      score: mine ? mine.score : 0,
-      qualifyingDaysInTier: mine ? mine.qualifyingDaysInTier : 0,
-      inThisTier,
-    },
+    me: req.userId
+      ? {
+        rank: inThisTier ? await rankOf(mine) : null,
+        score: mine ? mine.score : 0,
+        qualifyingDaysInTier: mine ? mine.qualifyingDaysInTier : 0,
+        stickDays: mine ? mine.stickDays : 0,
+        tier: mine ? mine.tier : 8,
+        inThisTier,
+      }
+      : null,
     pagination: { page, limit, total, totalPages },
   });
 }

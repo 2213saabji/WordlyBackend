@@ -4,6 +4,7 @@ const Payout = require('../models/Payout');
 const { istDayKey } = require('../utils/dailyWord');
 const { getTierConfig, tierDef } = require('../utils/tierConfig');
 const { parsePagination } = require('../utils/leaderboard');
+const { payoutReadiness } = require('../utils/verification');
 const {
   loadSettledMembership,
   creditActivity,
@@ -24,6 +25,10 @@ function serializeTierChange(c) {
     carriedScore: c.carriedScore,
     rankAtEntry: c.rankAtEntry,
     newTierSize: c.newTierSize,
+    // The old tier's last <=7 settled days at the moment of the move
+    // (e.g. the missed days behind a demotion). Empty for moves logged
+    // before this field existed.
+    window: (c.window || []).map((w) => ({ day: w.day, qualified: w.qualified })),
     day: c.day,
     createdAt: c.createdAt,
   };
@@ -31,7 +36,10 @@ function serializeTierChange(c) {
 
 async function rewardSummary(userId, membership, config) {
   const def = tierDef(config, 1);
-  const payouts = await Payout.find({ user: userId }).sort({ cycle: -1 }).limit(24).lean();
+  const [payouts, readiness] = await Promise.all([
+    Payout.find({ user: userId }).sort({ cycle: -1 }).limit(24).lean(),
+    payoutReadiness(userId),
+  ]);
   const inTier1 = membership && membership.tier === 1;
   return {
     enabled: config.rewardsEnabled,
@@ -39,9 +47,9 @@ async function rewardSummary(userId, membership, config) {
     day: inTier1 ? membership.stickDays : 0,
     of: def.daysToStick,
     amountInr: def.rewardInr,
-    // Verification ships in Phase 2; until then no payout can be sent.
-    verificationComplete: false,
-    blockedReason: payouts.some((p) => p.status === 'pending') ? 'verification_pending' : null,
+    verificationComplete: readiness.verificationComplete,
+    // 'review_case' | 'verification_pending' | null
+    blockedReason: readiness.blockedReason,
     payouts: payouts.map((p) => ({
       cycle: p.cycle,
       amountInr: p.amountInr,
@@ -72,6 +80,7 @@ async function tiers(req, res) {
       qualifyingDayBonus: config.scoring.qualifyingDayBonus,
     },
     demotion: config.demotion,
+    carryInPercent: config.carryInPercent,
     resetTimeIst: '00:00',
   });
 }
@@ -101,6 +110,7 @@ async function me(req, res) {
       demotion: { missesInWindow: 0, limit: config.demotion.misses, atRisk: false, window: [] },
       today: progress,
       lastChange: null,
+      completedCycles: [],
       reward: null,
     });
   }
@@ -137,6 +147,8 @@ async function me(req, res) {
     },
     today: progress,
     lastChange: lastChange ? serializeTierChange(lastChange) : null,
+    // Completed Diamond 30-day cycles, whether or not rewards are on.
+    completedCycles: (membership.completedCycles || []).map((c) => ({ cycle: c.cycle, day: c.day })),
     reward: tier === 1 ? await rewardSummary(req.userId, membership, config) : null,
   });
 }

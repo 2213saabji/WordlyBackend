@@ -22,6 +22,7 @@ function serializeGame(game, infinite = {}) {
     : difficultyForInfiniteWord(game.word);
 
   const base = {
+    id: game._id,
     mode: game.mode,
     date: game.date,
     status: game.status,

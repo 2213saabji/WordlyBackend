@@ -33,7 +33,13 @@ const tierMembershipSchema = new mongoose.Schema(
 
     lastSettledDay: { type: String, required: true }, // reset-job idempotency cursor (IST day)
     lastActiveDay: { type: String, default: null }, // IST day of the last completed game
-    rewardCycle: { type: Number, default: 0 }, // +1 each time a Tier 1 payout is created
+    rewardCycle: { type: Number, default: 0 }, // +1 each time a Tier 1 30-day cycle completes
+    // Every completed Tier 1 cycle, money or not (Diamond stars, "cycle
+    // complete" history rows). Kept across tier moves. ~12 entries a year.
+    completedCycles: {
+      type: [new mongoose.Schema({ cycle: Number, day: String }, { _id: false })],
+      default: [],
+    },
   },
   { timestamps: true }
 );
