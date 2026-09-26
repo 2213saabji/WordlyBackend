@@ -155,7 +155,7 @@ Returns up to the last 30 days of the caller's games, newest first, same shape a
 
 ### Infinite mode (`/game/infinite/current`, `/game/infinite/new`, `/game/infinite/guess`, `/game/infinite/hint`, `/game/infinite/history`)
 Same `game` shape and semantics as daily mode above (`mode: "infinite"` instead of `"daily"`), with these differences for the tier leaderboard (see [section 6](#6-infinite-tier-leaderboard)):
-- **`hint` is not included while the game is in progress** unless the player revealed it with `POST /game/infinite/hint`. It's included once the game ends.
+- **`hint` while the game is in progress:** included in Tiers 7–8 (same as today), and **not included in Tiers 1–6**. It's included for every tier once the game ends.
 - **`difficulty` is not included while the game is in progress.** It's included once the game ends.
 - Extra fields: `hintsEnabled` (the player's current tier allows hints), `hintRevealed`, `pointsAwarded`, `countedDay` (IST day the game counted toward), `tierAtCompletion`.
 - `date` is the IST day the game started.

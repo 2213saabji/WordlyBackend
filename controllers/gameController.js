@@ -36,13 +36,15 @@ function serializeGame(game, infinite = {}) {
   };
   if (game.mode !== 'infinite') return base;
 
-  // Infinite: the hint is only in the payload once the game is over or the
-  // player has revealed it through POST /game/infinite/hint (which is where
-  // the tier's hint rule is enforced).
+  // Infinite: mid-game, the hint is in the payload only when the player's
+  // tier allows hints (Tiers 7-8) or they already revealed it. Tiers 1-6
+  // never receive it until the game is over. POST /game/infinite/hint
+  // enforces the same rule for clients that fetch it on demand.
   const inProgress = game.status === 'in-progress';
+  const showHint = !inProgress || infinite.hintsEnabled || Boolean(game.hintRevealedAt);
   return {
     ...base,
-    hint: !inProgress || game.hintRevealedAt ? base.hint : undefined,
+    hint: showHint ? base.hint : undefined,
     difficulty: inProgress && infinite.hideDifficulty ? undefined : difficulty,
     hintsEnabled: infinite.hintsEnabled,
     hintRevealed: Boolean(game.hintRevealedAt),
