@@ -28,7 +28,7 @@ const tierMembershipSchema = new mongoose.Schema(
     // demotion. Promote when it reaches the tier's daysToStick. In Tier 1 it's
     // the reward cycle (0..30).
     stickDays: { type: Number, default: 0 },
-    window: { type: [windowDaySchema], default: [] }, // last <=7 settled days in this tier
+    window: { type: [windowDaySchema], default: [] }, // last settled days in this tier (daysToStick in tiers 1–4, 7 below)
     missesInWindow: { type: Number, default: 0 },
 
     lastSettledDay: { type: String, required: true }, // reset-job idempotency cursor (IST day)

@@ -4,6 +4,9 @@ const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
 const {
   signup,
+  resendSignup,
+  verifySignupOtp,
+  verifySignupLink,
   login,
   googleAuth,
   refresh,
@@ -15,6 +18,9 @@ const {
 } = require('../controllers/authController');
 
 router.post('/signup', signup);
+router.post('/signup/resend', resendSignup);
+router.post('/signup/verify-otp', verifySignupOtp);
+router.post('/signup/verify/:token', verifySignupLink);
 router.post('/login', login);
 router.post('/google', googleAuth);
 router.post('/refresh', refresh);

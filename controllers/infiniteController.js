@@ -2,7 +2,7 @@ const TierChange = require('../models/TierChange');
 const InfiniteDay = require('../models/InfiniteDay');
 const Payout = require('../models/Payout');
 const { istDayKey } = require('../utils/dailyWord');
-const { getTierConfig, tierDef } = require('../utils/tierConfig');
+const { getTierConfig, tierDef, demotionRule } = require('../utils/tierConfig');
 const { parsePagination } = require('../utils/leaderboard');
 const { payoutReadiness } = require('../utils/verification');
 const {
@@ -25,7 +25,7 @@ function serializeTierChange(c) {
     carriedScore: c.carriedScore,
     rankAtEntry: c.rankAtEntry,
     newTierSize: c.newTierSize,
-    // The old tier's last <=7 settled days at the moment of the move
+    // The old tier's miss window at the moment of the move
     // (e.g. the missed days behind a demotion). Empty for moves logged
     // before this field existed.
     window: (c.window || []).map((w) => ({ day: w.day, qualified: w.qualified })),
@@ -73,6 +73,7 @@ async function tiers(req, res) {
       minGamesCompleted: t.tier === 8 && config.tier8RequiresOneGame ? Math.max(1, t.minGamesCompleted) : t.minGamesCompleted,
       daysToStick: t.daysToStick,
       rewardInr: t.rewardInr,
+      demotion: demotionRule(config, t.tier),
     })),
     scoring: {
       solveBase: config.scoring.solveBase,
@@ -91,6 +92,7 @@ async function me(req, res) {
   const membership = await loadSettledMembership(req.userId, config);
   const tier = membership ? membership.tier : 8;
   const def = tierDef(config, tier);
+  const rule = demotionRule(config, tier);
   const today = istDayKey();
   const dayDoc = await InfiniteDay.findOne({ user: req.userId, day: today }).lean();
   const progress = todayProgress(dayDoc, tier, config, today);
@@ -107,7 +109,7 @@ async function me(req, res) {
       qualifyingDaysInTier: 0,
       consistencyPercent: null,
       counter: { stickDays: 0, daysToStick: def.daysToStick, daysLeft: def.daysToStick, resetsOnEntry: true },
-      demotion: { missesInWindow: 0, limit: config.demotion.misses, atRisk: false, window: [] },
+      demotion: { missesInWindow: 0, limit: rule.misses, windowDays: rule.windowDays, atRisk: false, window: [] },
       today: progress,
       lastChange: null,
       completedCycles: [],
@@ -140,9 +142,10 @@ async function me(req, res) {
     },
     demotion: {
       missesInWindow: membership.missesInWindow,
-      limit: config.demotion.misses,
+      limit: rule.misses,
+      windowDays: rule.windowDays,
       // Tier 8 can't be demoted.
-      atRisk: tier <= 7 && membership.missesInWindow >= config.demotion.misses - 1,
+      atRisk: tier <= 7 && membership.missesInWindow >= rule.misses - 1,
       window: membership.window.map((w) => ({ day: w.day, qualified: w.qualified })),
     },
     today: progress,

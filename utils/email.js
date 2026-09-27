@@ -192,6 +192,102 @@ async function sendPasswordResetEmail(toEmail, resetToken) {
   });
 }
 
+// Signup email: the 6-digit code as six tiles (3 + 3), an "or" divider,
+// then a one-tap verify-and-sign-in button with a paste-able fallback link.
+// `email` is the player's input, so it's escaped; code and url are
+// server-generated.
+function signupVerificationHtml({ email, code, url, ttlMinutes }) {
+  const digit = (d) =>
+    `<td width="48" height="60" align="center" bgcolor="#2A2030" style="width:48px;height:60px;border:1px solid #3A2E40;border-radius:12px;font-family:'Courier New',Courier,monospace;font-size:28px;font-weight:bold;color:#F3ECEF;">${d}</td>`;
+  const gap = (w) => `<td width="${w}" style="width:${w}px;font-size:0;line-height:0;">&nbsp;</td>`;
+  const tiles = code
+    .split('')
+    .map((d, i) => (i === 0 ? '' : gap(i === 3 ? 16 : 8)) + digit(d))
+    .join('');
+  const spaced = `${code.slice(0, 3)} ${code.slice(3)}`;
+
+  return `<body style="margin:0;padding:0;background:#17111B;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;color:#17111B;">Your GuessWord code is ${spaced}. Or tap the button to verify and sign in. Expires in ${ttlMinutes} minutes.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#17111B" style="background:#17111B;">
+<tbody><tr><td align="center" style="padding:32px 12px;">
+<table role="presentation" class="wrap" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;">
+<tbody><tr><td bgcolor="#1F1725" style="background:#1F1725;border:1px solid #2E2434;border-radius:20px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tbody><tr><td class="px" style="padding:40px 40px 0;font-family:Arial,Helvetica,sans-serif;">
+      <div style="font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#F2A05C;font-weight:bold;mso-line-height-rule:exactly;line-height:16px;">Verify your email</div>
+      <div style="padding-top:12px;font-size:28px;font-weight:bold;color:#F3ECEF;mso-line-height-rule:exactly;line-height:34px;">Welcome to GuessWord</div>
+      <div style="padding-top:12px;font-size:15px;color:#C9BFCC;mso-line-height-rule:exactly;line-height:23px;">Enter this code on the sign-up screen to confirm <span style="color:#F3ECEF;">${escapeHtml(email)}</span>.</div>
+    </td></tr>
+
+    <tr><td class="px" align="left" style="padding:28px 40px 0;">
+      <table role="presentation" class="otp" cellpadding="0" cellspacing="0" border="0"><tbody><tr>
+        ${tiles}
+      </tr></tbody></table>
+    </td></tr>
+    <tr><td class="px" style="padding:12px 40px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#9A8AA2;mso-line-height-rule:exactly;line-height:19px;">Expires in ${ttlMinutes} minutes.</td></tr>
+
+    <tr><td class="px" style="padding:28px 40px 0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tbody><tr>
+        <td width="45%" style="border-top:1px solid #3A2E40;font-size:0;line-height:0;">&nbsp;</td>
+        <td align="center" style="padding:0 12px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#9A8AA2;white-space:nowrap;">or</td>
+        <td width="45%" style="border-top:1px solid #3A2E40;font-size:0;line-height:0;">&nbsp;</td>
+      </tr></tbody></table>
+    </td></tr>
+
+    <tr><td class="px" style="padding:24px 40px 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#C9BFCC;mso-line-height-rule:exactly;line-height:23px;">Verify and sign in on this device in one tap.</td></tr>
+    <tr><td class="px" style="padding:16px 40px 0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tbody><tr>
+        <td align="center" bgcolor="#F2A05C" style="border-radius:14px;">
+          <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${url}" style="height:52px;v-text-anchor:middle;width:518px;" arcsize="27%" stroke="f" fillcolor="#F2A05C"><center style="color:#17111B;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">Verify email and sign in</center></v:roundrect><![endif]-->
+          <!--[if !mso]><!--><a href="${url}" target="_blank" style="display:block;padding:16px 24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:bold;color:#17111B;text-decoration:none;border-radius:14px;">Verify email and sign in</a><!--<![endif]-->
+        </td>
+      </tr></tbody></table>
+    </td></tr>
+    <tr><td class="px" style="padding:14px 40px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#9A8AA2;mso-line-height-rule:exactly;line-height:18px;">Button not working? Paste this into your browser:<br><a href="${url}" target="_blank" style="color:#F2A05C;text-decoration:underline;word-break:break-all;">${url}</a></td></tr>
+
+    <tr><td class="px" style="padding:32px 40px 36px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tbody><tr>
+        <td bgcolor="#251C2B" style="background:#251C2B;border-radius:12px;padding:16px 18px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#C9BFCC;mso-line-height-rule:exactly;line-height:20px;">
+          <span style="color:#F3ECEF;font-weight:bold;">Didn't sign up?</span> Ignore this email. No account is created until the email is verified. GuessWord will never ask for this code by phone or chat.
+        </td>
+      </tr></tbody></table>
+    </td></tr>
+  </tbody></table>
+</td></tr>
+</tbody></table>
+</td></tr>
+</tbody></table>
+</body>`;
+}
+
+// Signup confirmation: one email carrying both a 6-digit code (typed into
+// the signup screen) and a link to the frontend's /verify-signup/:token
+// page, which calls POST /api/auth/signup/verify/:token. Either one creates
+// the account.
+async function sendSignupVerificationEmail(toEmail, token, code, ttlMinutes) {
+  const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-signup/${token}`;
+
+  await getNoreplyTransporter().sendMail({
+    from: NOREPLY_EMAIL_FROM,
+    to: toEmail,
+    subject: `${code} is your GuessWord verification code`,
+    html: signupVerificationHtml({ email: toEmail, code, url: verifyUrl, ttlMinutes }),
+    // Plain-text part for clients that don't render HTML (and better deliverability).
+    text: [
+      `Welcome to GuessWord`,
+      ``,
+      `Your verification code is ${code}. Enter it on the sign-up screen to confirm ${toEmail}.`,
+      `It expires in ${ttlMinutes} minutes.`,
+      ``,
+      `Or verify and sign in with this link:`,
+      verifyUrl,
+      ``,
+      `Didn't sign up? Ignore this email. No account is created until the email is verified.`,
+      `GuessWord will never ask for this code by phone or chat.`,
+    ].join('\n'),
+  });
+}
+
 // Link to the frontend's /verify-email/:token page, which calls
 // POST /api/verification/email/confirm with the token.
 async function sendEmailVerificationEmail(toEmail, token) {
@@ -294,6 +390,7 @@ async function sendContactDigestEmail({ to, subject, rangeLabel, submissions }) 
 
 module.exports = {
   sendPasswordResetEmail,
+  sendSignupVerificationEmail,
   sendEmailVerificationEmail,
   sendContactNotificationEmail,
   sendContactDigestEmail,

@@ -102,7 +102,7 @@ async function weeklyContactDigest(req, res) {
 }
 
 // Settles yesterday (IST) for the Infinite tier board: day counters, the
-// 7-day miss window, promotion, demotion and the Tier 1 reward cycle. One
+// miss window, promotion, demotion and the Tier 1 reward cycle. One
 // call handles up to `batchSize` members; the caller repeats until
 // `done: true` (see .github/workflows/infinite-daily-reset.yml). Safe to run
 // late or twice — settleMembership() only applies days after each member's

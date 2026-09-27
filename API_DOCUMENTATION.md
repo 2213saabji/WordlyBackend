@@ -6,7 +6,7 @@ All request/response bodies are JSON. Send `Content-Type: application/json` on e
 
 ## Auth
 
-Every endpoint except `signup`, `login`, `forgot-password`, and `reset-password/:token` requires:
+Every endpoint except `signup` (and its `resend` / `verify-otp` / `verify/:token` steps), `login`, `forgot-password`, and `reset-password/:token` requires:
 
 ```
 Authorization: Bearer <token>
@@ -26,17 +26,50 @@ with an appropriate HTTP status (`400` validation, `401` auth, `403` forbidden, 
 
 ## 1. Auth endpoints
 
-### `POST /auth/signup`
-Create an account.
+### Signup (email verification)
+Signup is two steps. The account is **only created once the email is verified**, so login, Google sign-in and existing accounts are unaffected.
 
+1. `POST /auth/signup` emails the player a **6-digit code** and a **link** (`${FRONTEND_URL}/verify-signup/<token>`). Both expire in 15 minutes.
+2. The player either types the code on the signup screen (`POST /auth/signup/verify-otp`) or clicks the link (`POST /auth/signup/verify/:token`). Either one creates the account and logs this device in. Once one is used, both stop working.
+
+### `POST /auth/signup`
 Request:
 ```json
 { "username": "Alice", "email": "alice@example.com", "password": "at-least-8-chars" }
 ```
-Response `201`:
+Response `202` (no token yet; show the "enter your code" screen):
+```json
+{ "message": "We sent a verification code and link to your email", "email": "alice@example.com",
+  "expiresInSeconds": 900, "resendAfterSeconds": 60 }
+```
+Errors: `400` missing fields / invalid email / password too short; `409 EMAIL_TAKEN` email already has an account; `429 SIGNUP_RATE_LIMITED` (with `retryAfterSeconds`) signed up again with this email less than a minute ago; `502 EMAIL_SEND_FAILED` the email couldn't be sent (try again).
+
+Signing up again with the same email (after a minute) replaces the earlier username/password and sends a new code; the old code and link stop working.
+
+### `POST /auth/signup/resend`
+```json
+{ "email": "alice@example.com" }
+```
+Response `200`: same body as signup. Sends a new code and link, and the old ones stop working. Errors: `404 SIGNUP_NOT_FOUND` nothing is waiting for this email (pending signups are dropped 24 h after the last email, so send the player back to signup); `429 SIGNUP_RATE_LIMITED` with `retryAfterSeconds`; `502 EMAIL_SEND_FAILED`.
+
+### `POST /auth/signup/verify-otp`
+```json
+{ "email": "alice@example.com", "code": "482913", "deviceId": "..." }
+```
+Response `201`: `token` + `deviceId` + `user`, same shape as login (see the `user` example below). Errors: `400 SIGNUP_CODE_INVALID` wrong or expired code; `400 SIGNUP_CODE_ATTEMPTS` 5 wrong codes, so ask for a new one with `/signup/resend`; `409 EMAIL_TAKEN` the email got an account in the meantime (e.g. via Google), so send the player to login.
+
+### `POST /auth/signup/verify/:token`
+Called by the frontend's **`/verify-signup/:token`** page, the link in the email. It may be opened on a different device or browser than the one used to sign up.
+```json
+{ "deviceId": "..." }
+```
+Response `201`: `token` + `deviceId` + `user`, the same as `verify-otp`. Errors: `400 SIGNUP_LINK_INVALID` invalid, expired or already used (if the player already verified with the code, send them to login); `409 EMAIL_TAKEN`.
+
+`user` shape (returned by verify-otp, verify/:token, login and Google):
 ```json
 {
   "token": "eyJhbGciOi...",
+  "deviceId": "...",
   "user": {
     "id": "66f...",
     "username": "Alice",
@@ -50,13 +83,12 @@ Response `201`:
   }
 }
 ```
-Errors: `400` missing fields / invalid email / password too short, `409` email already registered.
 
 ### `POST /auth/login`
 ```json
 { "email": "alice@example.com", "password": "...", "deviceId": "..." }
 ```
-Response `200`: same shape as signup (`token` + `deviceId` + `user`). `401` on bad credentials — also returned (same generic message, to avoid revealing which accounts are Google-only) if the account was created via Google sign-in and has no password set.
+Response `200`: `token` + `deviceId` + `user` (shape above). Unchanged by signup verification: a signup that was never verified has no account, so login returns the usual `401`. `401` on bad credentials — also returned (same generic message, to avoid revealing which accounts are Google-only) if the account was created via Google sign-in and has no password set.
 
 ### `POST /auth/google`
 Signs the user in with a Google ID token instead of a password. Use this after the frontend runs Google Identity Services / Google Sign-In and receives a credential — send that credential here as `idToken`, don't try to validate it client-side.
@@ -351,10 +383,12 @@ Now always returns `"infinite": { "tier": 4, "tierName": "Silver" }` for a heade
 ```json
 { "version": 0,
   "tiers": [ { "tier": 1, "name": "Diamond", "hintsEnabled": false, "minActiveMinutes": 60,
-               "minGamesCompleted": 20, "daysToStick": 30, "rewardInr": 100 }, "..." ],
+               "minGamesCompleted": 20, "daysToStick": 30, "rewardInr": 100,
+               "demotion": { "misses": 3, "windowDays": 30 } }, "..." ],
   "scoring": { "solveBase": 10, "perUnusedGuess": 2, "qualifyingDayBonus": 20 },
-  "demotion": { "misses": 3, "windowDays": 7 }, "carryInPercent": 20, "resetTimeIst": "00:00" }
+  "demotion": { "misses": 3, "windowDays": 7, "stickWindowMaxTier": 4 }, "carryInPercent": 20, "resetTimeIst": "00:00" }
 ```
+Each tier's `demotion` is the rule for that tier: the player is demoted on their `misses`-th missed day within the last `windowDays` settled days in the tier. In tiers 1–4 the window is the tier's commitment period (`daysToStick`): 3 misses in 30 days for Diamond and Platinum, 21 for Gold, 14 for Silver. Tiers 5–7 use 3 misses in 7 days. Tier 8 can't be demoted.
 
 ### `GET /infinite/me`
 The player's tier status and today's progress card.
@@ -362,7 +396,7 @@ The player's tier status and today's progress card.
 { "tier": 4, "tierName": "Silver", "hintsEnabled": false,
   "score": 632, "rank": 14, "tierSize": 212, "qualifyingDaysInTier": 9, "consistencyPercent": 82,
   "counter": { "stickDays": 5, "daysToStick": 14, "daysLeft": 9, "resetsOnEntry": true },
-  "demotion": { "missesInWindow": 1, "limit": 3, "atRisk": false, "window": [ { "day": "2026-09-20", "qualified": true } ] },
+  "demotion": { "missesInWindow": 1, "limit": 3, "windowDays": 14, "atRisk": false, "window": [ { "day": "2026-09-20", "qualified": true } ] },
   "today": { "day": "2026-09-26", "activeMinutes": 18, "targetMinutes": 25, "gamesCompleted": 6, "targetGames": 9,
              "qualified": false, "completionRatio": 0.69, "resetsAt": "2026-09-26T18:30:00.000Z" },
   "lastChange": { "fromTier": 5, "toTier": 4, "reason": "promotion", "oldScore": 1450, "oldRank": 12, "oldTierSize": 60,
@@ -393,7 +427,7 @@ Every guess also counts as a heartbeat.
 `me` is the pinned row: `null` when signed out; for a signed-in player viewing another tier it has `inThisTier: false` and `rank: null`. A present but invalid/expired token still gets `401`. `400 INVALID_TIER` if `tier` isn't 1–8.
 
 ### `GET /infinite/tier-changes?page=1`
-The player's promotions and demotions, newest first: `{ "changes": [ { "fromTier", "toTier", "reason", "oldScore", "oldRank", "oldTierSize", "carriedScore", "rankAtEntry", "newTierSize", "window", "day", "createdAt" } ], "pagination": { "page", "limit", "total", "totalPages" } }`. `window` is the old tier's last ≤7 days (`{ day, qualified }`) at the moment of the move, e.g. the missed days behind a demotion. It's empty for moves logged before this field existed.
+The player's promotions and demotions, newest first: `{ "changes": [ { "fromTier", "toTier", "reason", "oldScore", "oldRank", "oldTierSize", "carriedScore", "rankAtEntry", "newTierSize", "window", "day", "createdAt" } ], "pagination": { "page", "limit", "total", "totalPages" } }`. `window` is the old tier's miss window (its last ≤`windowDays` days) (`{ day, qualified }`) at the moment of the move, e.g. the missed days behind a demotion. It's empty for moves logged before this field existed.
 
 ### `GET /notifications?unread=true&page=1` · `POST /notifications/read`
 ```json
@@ -402,7 +436,7 @@ The player's promotions and demotions, newest first: `{ "changes": [ { "fromTier
 ```
 Types sent today and their `data`:
 - `promotion`, `demotion`: `fromTier`, `toTier`, `reason`, `oldScore`, `oldRank`, `oldTierSize`, `carriedScore`, `rankAtEntry`, `newTierSize`.
-- `demotion_risk` (2 misses in the window): `tier`, `missesInWindow`, `limit`.
+- `demotion_risk` (2 misses in the window): `tier`, `missesInWindow`, `limit`, `windowDays`.
 - `reward_earned` (only when rewards are on): `cycle`, `amountInr`, `day`.
 - `verification_needed` (on promotion to Tier 1, only when rewards are on): `tier`.
 
@@ -509,5 +543,6 @@ The email address is always the one on the player's account. The player doesn't 
 
 - **CORS** is open (`cors()` with no restrictions) so the frontend can call this API from any origin during development. Tighten this (`origin: '<your frontend URL>'`) before production if needed — flag that to the backend if you deploy to a fixed domain.
 - **Reset-password route**: make sure a `/reset-password/:token` page exists on the frontend and calls `POST /auth/reset-password/:token`, since that's the link users receive by email.
+- **Verify-signup route**: make sure a `/verify-signup/:token` page exists on the frontend and calls `POST /auth/signup/verify/:token` with the device's `deviceId`, since that's the link in the signup email. On `201`, store the token and treat the player as logged in.
 - **Auth persistence**: there's no refresh-token endpoint — the JWT is valid for 7 days flat; when it expires, `401` responses mean "log in again."
 - **Dictionary size**: the accepted-guess word list is currently a few hundred common words (see backend `data/words.js`), not the full Wordle dictionary — expect some valid English words to be rejected with "Not a recognized word" until that list is expanded.
