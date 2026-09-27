@@ -7,6 +7,8 @@ const assert = require('node:assert/strict');
 const InfiniteDay = require('../models/InfiniteDay');
 const TierMembership = require('../models/TierMembership');
 const Game = require('../models/Game');
+const SyncState = require('../models/SyncState');
+const SyncGlobal = require('../models/SyncGlobal');
 const { DEFAULT_TIER_CONFIG: config } = require('../utils/tierConfig');
 const { creditActivity } = require('../utils/tiers');
 
@@ -18,6 +20,7 @@ const T0 = new Date('2026-09-28T06:00:00.000Z'); // 11:30 IST
 let days; // _id -> day doc
 let nextId;
 let recentPlay; // what Game.findOne returns for hasRecentPlay()
+let bumps; // sync keys bumped, in order
 
 const lean = (v) => ({ lean: async () => (v ? { ...v } : null) });
 const sameAnchor = (a, b) => (a == null && b == null) || (a != null && b != null && new Date(a).getTime() === new Date(b).getTime());
@@ -52,6 +55,12 @@ beforeEach(() => {
   InfiniteDay.updateOne = async () => ({ modifiedCount: 0 });
   TierMembership.updateOne = async () => ({});
   Game.findOne = () => ({ sort: () => ({ select: () => lean(recentPlay) }) });
+  bumps = [];
+  SyncState.updateOne = async (filter, update) => {
+    bumps.push(...Object.keys(update.$inc).map((p) => p.slice(2)));
+    return {};
+  };
+  SyncGlobal.updateOne = async () => ({});
 });
 
 const at = (ms) => new Date(T0.getTime() + ms);
@@ -134,6 +143,29 @@ test('old client heartbeats alongside guesses do not double-count', async () => 
   await beat(at(35000)); // +15 s
   await game(at(50000)); // guess, +15 s
   assert.equal(activeMs(), 50000); // exactly the elapsed time
+});
+
+// --- sync: /infinite/me shows whole minutes, so only a new minute bumps it ---
+
+test('sync: credits that stay within the same minute do not bump infinite', async () => {
+  await game(T0);
+  await game(at(20000));
+  await game(at(45000));
+  assert.deepEqual(bumps, []);
+});
+
+test('sync: a credit that reaches a new minute bumps infinite once', async () => {
+  await game(T0);
+  await game(at(50000)); // 0:50
+  await game(at(65000)); // 1:05 → new minute
+  await game(at(80000)); // 1:20
+  assert.deepEqual(bumps, ['infinite']);
+});
+
+test('sync: a credit lost to another tab does not bump', async () => {
+  await game(T0);
+  await Promise.all([game(at(61000)), game(at(62000))]);
+  assert.deepEqual(bumps, ['infinite']); // only the tab that credited
 });
 
 // --- heartbeat path unchanged ---

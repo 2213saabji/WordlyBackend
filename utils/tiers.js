@@ -12,6 +12,7 @@ const Payout = require('../models/Payout');
 const Game = require('../models/Game');
 const { tierDef, demotionRule, dayTargets } = require('./tierConfig');
 const { istDayKey, addDaysKey, istDayStart, diffDaysKey } = require('./dailyWord');
+const { bumpSync, bumpGlobal } = require('./sync');
 
 const MS_PER_MINUTE = 60 * 1000;
 
@@ -49,8 +50,10 @@ function tierSize(tier) {
 
 // --- Notifications -----------------------------------------------------------
 
-function notify(userId, type, data = {}) {
-  return Notification.create({ user: userId, type, data });
+async function notify(userId, type, data = {}) {
+  const created = await Notification.create({ user: userId, type, data });
+  await bumpSync(userId, 'notifications');
+  return created;
 }
 
 // --- Membership --------------------------------------------------------------
@@ -123,6 +126,7 @@ async function evaluateQualification(dayDoc, config) {
     { user: dayDoc.user, tier: dayDoc.tier },
     { $inc: { score: bonus, qualifyingDaysInTier: 1 }, $set: { scoreReachedAt: now } }
   );
+  await Promise.all([bumpSync(dayDoc.user, 'infinite'), bumpGlobal('infiniteBoard')]);
   return bonus;
 }
 
@@ -221,6 +225,12 @@ async function creditActivity({ userId, tier, config, visible, lastInputAgoMs, s
     return { creditedMs: 0, dayDoc: await InfiniteDay.findById(dayDoc._id).lean() };
   }
 
+  // /infinite/me shows whole minutes, so only a new minute changes it —
+  // most guesses don't need the extra write.
+  if (Math.floor(updated.activeMs / MS_PER_MINUTE) !== Math.floor((updated.activeMs - creditedMs) / MS_PER_MINUTE)) {
+    await bumpSync(userId, 'infinite');
+  }
+
   const bonus = await evaluateQualification(updated, config);
   return {
     creditedMs,
@@ -269,6 +279,8 @@ async function scoreFinishedGame(game, { config, maxAttempts, now = new Date() }
     membershipUpdate.$set.scoreReachedAt = now;
   }
   await TierMembership.updateOne({ _id: membership._id }, membershipUpdate);
+  // The score (or, for a first game, the player) is new on the tier board.
+  await Promise.all([bumpSync(game.user, 'infinite'), bumpGlobal('infiniteBoard')]);
 
   const bonus = await evaluateQualification(updatedDay, config);
   const finalDay = bonus ? await InfiniteDay.findById(updatedDay._id).lean() : updatedDay;
@@ -307,6 +319,8 @@ async function settleMembership(initial, config, uptoDay = yesterdayIst()) {
   const latestDay = yesterdayIst();
 
   let persistedDay = m.lastSettledDay;
+  // Sync keys this settle changed, bumped once at the end.
+  const touched = new Set();
   const state = {
     tier: m.tier,
     stickDays: m.stickDays,
@@ -360,6 +374,8 @@ async function settleMembership(initial, config, uptoDay = yesterdayIst()) {
       const change = { fromTier, toTier, reason, oldScore: fresh.score, oldRank, oldTierSize, carriedScore, rankAtEntry, newTierSize };
       // The old tier's window, including the day that triggered the move.
       await TierChange.create({ user: m.user, day, ...change, window: before.window });
+      touched.add('me').add('tierChanges'); // /auth/me carries the tier badge
+      if (fromTier === 1 || toTier === 1) touched.add('rewards');
       await notify(m.user, reason, change);
       // Verification is only for payouts, so only prompt for it while
       // rewards are switched on.
@@ -393,6 +409,7 @@ async function settleMembership(initial, config, uptoDay = yesterdayIst()) {
           );
           if (result.upsertedCount) {
             stats.payoutsCreated += 1;
+            touched.add('rewards');
             await notify(m.user, 'reward_earned', { cycle, amountInr: def.rewardInr, day });
           }
         }
@@ -437,6 +454,19 @@ async function settleMembership(initial, config, uptoDay = yesterdayIst()) {
     if (!(err instanceof SettleConflict)) throw err;
     // Another request or the reset job settled concurrently; theirs stands.
     m = await TierMembership.findById(m._id).lean();
+  } finally {
+    // Whatever this call managed to write, even if it then failed. Any
+    // settled day changes /infinite/me (counter, window); in Tier 1 it's
+    // also the reward tracker's day count.
+    if (persistedDay !== initial.lastSettledDay) {
+      touched.add('infinite');
+      if (initial.tier === 1) touched.add('rewards');
+    }
+    if (touched.size) await bumpSync(initial.user, [...touched]);
+    // A tier move takes the player off one board and onto another. (Plain
+    // settled days also change stickDays on the board, but for everyone at
+    // once — /sync covers that with the IST date instead of a bump each.)
+    if (touched.has('tierChanges')) await bumpGlobal('infiniteBoard');
   }
 
   return { membership: m, stats };

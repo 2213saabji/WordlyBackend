@@ -6,7 +6,7 @@ All request/response bodies are JSON. Send `Content-Type: application/json` on e
 
 ## Auth
 
-Every endpoint except `signup` (and its `resend` / `verify-otp` / `verify/:token` steps), `login`, `forgot-password`, and `reset-password/:token` requires:
+Every endpoint except `signup` (and its `resend` / `verify-otp` / `verify/:token` steps), `login`, `forgot-password`, and `reset-password/:token` requires the header below (including `GET /sync`):
 
 ```
 Authorization: Bearer <token>
@@ -536,6 +536,48 @@ The email address is always the one on the player's account. The player doesn't 
 | `EMAIL_SEND_FAILED` | 502 | The email couldn't be sent; retry |
 | `VERIFICATION_TOKEN_INVALID` | 400 | Bad, expired or already-used email link |
 | `BANK_NAME_INVALID` · `BANK_ACCOUNT_INVALID` · `IFSC_INVALID` | 400 | Bank form validation |
+
+---
+
+## 8. Sync: only refetch what changed
+
+### `GET /sync?since=<syncToken>`
+Auth required. Tells the app which APIs have data that changed since the app last fetched them. Call it when a page opens, then call **only** the APIs marked `true` and use stored data for the rest.
+
+```json
+{
+  "syncToken": "eyJ0diI6MSwicyI6eyJtZSI6WzEy…",
+  "changed": {
+    "me": false, "mine": true, "notifications": true, "infinite": false, "tierChanges": false,
+    "rewards": false, "today": false, "tiers": false, "daily": true, "weekly": false, "infiniteBoard": false
+  }
+}
+```
+
+- **First call:** send no `since`. Everything comes back `true`.
+- **After each sync:** mark the cached data of every `true` API as **stale**, save the new `syncToken`, and send it as `since` next time. Refetch a stale API when a page needs it; that can be right away for the current page, or later. Don't just drop a `true` flag for an API the current page doesn't use: the new token already counts it as fetched, so the change would be lost.
+- **Keep the stale mark until a refetch succeeds.** A failed refetch leaves the data stale, so it's retried on the next page load.
+- **One token per device and per user.** Clear the token (and the cached data) on logout or when another account logs in.
+- A missing, broken or old-format token is treated as a first sync (everything `true`). It never returns an error.
+- `Cache-Control: no-store`: the response is per user and must not be cached.
+
+| Flag | API to refetch | Turns `true` when |
+|---|---|---|
+| `me` | `GET /auth/me` | Username changed, a daily game finished (stats), joined/left/created a group, tier changed (badge) |
+| `mine` | `GET /groups/mine` | This user **or another member** created, joined, left or renamed one of their groups |
+| `notifications` | `GET /notifications` | A notification arrived or was marked read |
+| `infinite` | `GET /infinite/me` | Infinite play (score, new active-time minute, qualifying day), the nightly tier reset (IST midnight), verification changes (Tier 1) |
+| `tierChanges` | `GET /infinite/tier-changes` | Promoted or demoted |
+| `rewards` | `GET /rewards/me` | Payout created, Tier 1 day count, verification steps |
+| `today` | `GET /game/today` | A guess in today's daily game (e.g. from another device), or a new daily word (UTC midnight) |
+| `tiers` | `GET /infinite/tiers` | The tier config was edited |
+| `daily` | `GET /leaderboard/daily` | Someone finished a daily game or renamed, or a new UTC day |
+| `weekly` | `GET /leaderboard/weekly` | Same as `daily`, or a new week (Monday UTC) |
+| `infiniteBoard` | `GET /leaderboard/infinite` | Any Infinite score or tier change, or a rename, or a new IST day |
+
+- **The leaderboards (`daily`, `weekly`, `infiniteBoard`) turn `true` at most once every 60 s**, counted from the app's last fetch of that board. They change with every other player's game, so this caps a board at about one refresh a minute.
+- **Safety net:** any API the app hasn't refetched for **15 minutes** comes back `true`, even if nothing is known to have changed.
+- **Not covered by flags:** group leaderboards (`/groups/:id/leaderboard…`), history endpoints, `/game/infinite/current`, verification status, passkeys. Fetch these as before.
 
 ---
 

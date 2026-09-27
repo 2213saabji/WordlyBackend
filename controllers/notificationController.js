@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Notification = require('../models/Notification');
 const { parsePagination } = require('../utils/leaderboard');
+const { bumpSync } = require('../utils/sync');
 
 // GET /notifications?unread=true&page=1
 async function list(req, res) {
@@ -43,6 +44,7 @@ async function markRead(req, res) {
     { _id: { $in: validIds }, user: req.userId, readAt: null },
     { $set: { readAt: new Date() } }
   );
+  if (result.modifiedCount > 0) await bumpSync(req.userId, 'notifications');
   return res.json({ updated: result.modifiedCount });
 }
 
