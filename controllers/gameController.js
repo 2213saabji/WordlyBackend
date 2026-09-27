@@ -184,7 +184,7 @@ async function infiniteContext(userId) {
   };
 }
 
-async function getOrCreateCurrentInfiniteGame(userId, tier) {
+async function getOrCreateCurrentInfiniteGame(userId, ctx) {
   let game = await Game.findOne({ user: userId, mode: 'infinite', status: 'in-progress' });
   if (!game) {
     const roundIndex = await Game.countDocuments({ user: userId, mode: 'infinite' });
@@ -193,15 +193,19 @@ async function getOrCreateCurrentInfiniteGame(userId, tier) {
       date: istDayKey(),
       word: infiniteWordForRound(userId, roundIndex),
       mode: 'infinite',
-      tierAtStart: tier,
+      tierAtStart: ctx.tier,
     });
+    // Starting a round is a game action: it credits the time since the
+    // previous one (the result screen, moving to the next word), capped.
+    // Only on creation — returning an existing round is a page load, not play.
+    await creditActivity({ userId, tier: ctx.tier, config: ctx.config, source: 'game' });
   }
   return game;
 }
 
 async function getCurrentInfinite(req, res) {
   const ctx = await infiniteContext(req.userId);
-  const game = await getOrCreateCurrentInfiniteGame(req.userId, ctx.tier);
+  const game = await getOrCreateCurrentInfiniteGame(req.userId, ctx);
   return res.json({ game: serializeGame(game, ctx.view) });
 }
 
@@ -228,7 +232,7 @@ async function newInfiniteGame(req, res) {
     }
   }
 
-  const game = await getOrCreateCurrentInfiniteGame(req.userId, ctx.tier);
+  const game = await getOrCreateCurrentInfiniteGame(req.userId, ctx);
   const today = istDayKey();
   const dayDoc = await InfiniteDay.findOne({ user: req.userId, day: today }).lean();
   return res.status(201).json({
@@ -300,8 +304,8 @@ async function submitInfiniteGuess(req, res) {
 
   await game.save();
 
-  // A guess is also a heartbeat: it's input, on a visible game.
-  await creditActivity({ userId: req.userId, tier: ctx.tier, config: ctx.config, visible: true, lastInputAgoMs: 0 });
+  // A guess is a game action: it credits the time since the previous one.
+  await creditActivity({ userId: req.userId, tier: ctx.tier, config: ctx.config, source: 'game' });
 
   // Deliberately no applyStatsForFinishedGame call — infinite rounds don't
   // affect user.stats or streaks. They score on the tier board instead.

@@ -24,6 +24,7 @@ const DEFAULT_TIER_CONFIG = {
   activity: {
     heartbeatMinIntervalMs: 10000, // rate limit: beats closer than this earn nothing
     maxHeartbeatGapMs: 45000, // a longer gap (dropped beats, new session) earns nothing
+    maxGameActionGapMs: 120000, // cap per gap between game actions (round start / guess)
     idleInputMs: 60000, // no input for this long = idle
     requireGuessWithinMs: 180000, // server-side evidence of actual play
     resultScreenMs: 60000, // time on the result screen after a game still counts

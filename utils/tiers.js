@@ -172,30 +172,43 @@ async function hasRecentPlay(userId, now, config) {
   return now - lastActivity <= requireGuessWithinMs;
 }
 
-// Credits active time for one heartbeat. Time is credited as
-// now - lastHeartbeatAt on the user's day document — per user, not per
+// Credits active time for one heartbeat or game action. Time is credited
+// as now - lastHeartbeatAt on the user's day document — per user, not per
 // request — so several tabs share the same real time and can't add up to
 // more. The conditional update makes a lost race credit 0.
-async function creditActivity({ userId, tier, config, visible, lastInputAgoMs, now = new Date() }) {
-  const { heartbeatMinIntervalMs, maxHeartbeatGapMs, idleInputMs } = config.activity;
+//
+// source 'heartbeat' (the legacy 15 s client beat): a gap over
+// maxHeartbeatGapMs earns 0, and the beat must pass the rate limit, the
+// client's visible/input report and hasRecentPlay().
+// source 'game' (round start or guess, recorded by the server itself): the
+// action is the evidence of play, so none of those checks apply; each gap
+// is capped at maxGameActionGapMs instead, so thinking time counts but a
+// player who walks away mid-round earns at most the cap.
+async function creditActivity({ userId, tier, config, visible, lastInputAgoMs, source = 'heartbeat', now = new Date() }) {
+  const { heartbeatMinIntervalMs, maxHeartbeatGapMs, maxGameActionGapMs, idleInputMs } = config.activity;
   const day = istDayKey(now);
   const dayDoc = await getOrCreateDay(userId, day, tier, config);
 
   const prev = dayDoc.lastHeartbeatAt;
   const gap = prev ? now - new Date(prev) : null;
 
-  // Rate limit: too soon after the last beat. Leave lastHeartbeatAt alone so
-  // the next on-time beat still gets its full gap.
-  if (gap !== null && gap < heartbeatMinIntervalMs) {
-    return { creditedMs: 0, dayDoc };
-  }
+  let creditedMs;
+  if (source === 'game') {
+    creditedMs = gap === null ? 0 : Math.max(0, Math.min(gap, maxGameActionGapMs));
+  } else {
+    // Rate limit: too soon after the last beat. Leave lastHeartbeatAt alone
+    // so the next on-time beat still gets its full gap.
+    if (gap !== null && gap < heartbeatMinIntervalMs) {
+      return { creditedMs: 0, dayDoc };
+    }
 
-  const inputAgo = Number(lastInputAgoMs);
-  const eligible = visible === true
-    && Number.isFinite(inputAgo)
-    && inputAgo <= idleInputMs
-    && (await hasRecentPlay(userId, now, config));
-  const creditedMs = eligible && gap !== null && gap <= maxHeartbeatGapMs ? gap : 0;
+    const inputAgo = Number(lastInputAgoMs);
+    const eligible = visible === true
+      && Number.isFinite(inputAgo)
+      && inputAgo <= idleInputMs
+      && (await hasRecentPlay(userId, now, config));
+    creditedMs = eligible && gap !== null && gap <= maxHeartbeatGapMs ? gap : 0;
+  }
 
   const updated = await InfiniteDay.findOneAndUpdate(
     { _id: dayDoc._id, lastHeartbeatAt: prev },
