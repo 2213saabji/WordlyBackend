@@ -205,9 +205,6 @@ function signupVerificationHtml({ email, code, url, ttlMinutes }) {
     .map((d, i) => (i === 0 ? '' : gap(i === 3 ? 16 : 8)) + digit(d))
     .join('');
   const spaced = `${code.slice(0, 3)} ${code.slice(3)}`;
-  // Emails can't copy to the clipboard, so "Copy code" opens the frontend's
-  // /copy page, which copies it.
-  const copyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/copy?c=${code}`;
 
   return `<body style="margin:0;padding:0;background:#17111B;">
 <span style="display:none;max-height:0;overflow:hidden;opacity:0;color:#17111B;">Your GuessWord code is ${spaced}. Or tap the button to verify and sign in. Expires in ${ttlMinutes} minutes.</span>
@@ -225,13 +222,6 @@ function signupVerificationHtml({ email, code, url, ttlMinutes }) {
     <tr><td class="px" align="left" style="padding:28px 40px 0;">
       <table role="presentation" class="otp" cellpadding="0" cellspacing="0" border="0"><tbody><tr>
         ${tiles}
-      </tr></tbody></table>
-    </td></tr>
-    <tr><td class="px" style="padding:14px 40px 0;">
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tbody><tr>
-        <td align="center" style="border:1px solid #F2A05C;border-radius:12px;">
-          <a href="${copyUrl}" style="display:block;padding:10px 20px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;color:#F2A05C;text-decoration:none;border-radius:12px;">Copy code</a>
-        </td>
       </tr></tbody></table>
     </td></tr>
     <tr><td class="px" style="padding:12px 40px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#9A8AA2;mso-line-height-rule:exactly;line-height:19px;">Expires in ${ttlMinutes} minutes.</td></tr>
