@@ -10,6 +10,7 @@ const PendingSignup = require('../models/PendingSignup');
 const { sendPasswordResetEmail, sendSignupVerificationEmail } = require('../utils/email');
 const { getTierConfig, tierDef } = require('../utils/tierConfig');
 const { safeEqualHex } = require('../utils/verificationCrypto');
+const { bumpSync, bumpGlobal } = require('../utils/sync');
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const RESET_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
@@ -431,6 +432,8 @@ async function updateUsername(req, res) {
   if (!user) {
     return res.status(404).json({ message: 'User not found' });
   }
+  // The name also shows on every leaderboard the player is on.
+  await Promise.all([bumpSync(req.userId, 'me'), bumpGlobal(['daily', 'weekly', 'infiniteBoard'])]);
   return res.json({ user: publicUser(user) });
 }
 

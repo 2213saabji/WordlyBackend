@@ -13,6 +13,7 @@ const {
   maskEmail,
   maskAccount,
   getVerification,
+  verificationChanged,
   claimIdentity,
   autoVerifyGoogleEmail,
   serializeStatus,
@@ -106,6 +107,7 @@ async function sendMobileOtp(req, res) {
   v.mobile.otpAttempts = 0;
   v.mobile.otpSentAt = [...recentSends, new Date(now)];
   await v.save();
+  await verificationChanged(req.userId);
 
   return res.json({ ...(await serializeStatus(v)), expiresInSeconds: OTP_TTL_MS / 1000 });
 }
@@ -145,6 +147,7 @@ async function verifyMobileOtp(req, res) {
   m.otpExpiresAt = null;
   m.otpAttempts = 0;
   await v.save();
+  await verificationChanged(req.userId);
 
   return res.json(await serializeStatus(v));
 }
@@ -175,6 +178,7 @@ async function sendEmailLink(req, res) {
   v.email.tokenExpiresAt = new Date(now + EMAIL_TOKEN_TTL_MS);
   v.email.lastSentAt = new Date(now);
   await v.save();
+  await verificationChanged(req.userId);
 
   try {
     await sendEmailVerificationEmail(user.email, rawToken);
@@ -211,6 +215,7 @@ async function confirmEmail(req, res) {
   v.email.tokenHash = null;
   v.email.tokenExpiresAt = null;
   await v.save();
+  await verificationChanged(v.user);
 
   return res.json({ message: 'Email verified', email: { status: 'verified', masked: v.email.masked } });
 }
@@ -257,6 +262,7 @@ async function submitBank(req, res) {
     v.bank.verifiedAt = result.nameMatch ? new Date() : null;
     await v.save();
   }
+  await verificationChanged(req.userId);
 
   return res.json(await serializeStatus(v));
 }

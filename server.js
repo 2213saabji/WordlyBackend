@@ -16,6 +16,7 @@ const infiniteRoutes = require('./routes/infiniteRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const rewardRoutes = require('./routes/rewardRoutes');
 const verificationRoutes = require('./routes/verificationRoutes');
+const syncRoutes = require('./routes/syncRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 8888;
@@ -92,6 +93,7 @@ app.use('/api/infinite', infiniteRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/rewards', rewardRoutes);
 app.use('/api/verification', verificationRoutes);
+app.use('/api/sync', syncRoutes);
 
 // 404 handler
 app.use((req, res) => {

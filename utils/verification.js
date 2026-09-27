@@ -6,8 +6,16 @@ const IdentityClaim = require('../models/IdentityClaim');
 const ReviewCase = require('../models/ReviewCase');
 const User = require('../models/User');
 const { identityHash } = require('./verificationCrypto');
+const { bumpSync } = require('./sync');
 
 const STEPS = ['mobile', 'email', 'bank'];
+
+// Verification state feeds the reward tracker's blockedReason, shown by
+// /rewards/me and by the Tier 1 reward block of /infinite/me. Call after
+// any verification or review-case write.
+function verificationChanged(userId) {
+  return bumpSync(userId, ['rewards', 'infinite']);
+}
 
 function maskPhone(e164) {
   const last4 = e164.slice(-4);
@@ -63,12 +71,14 @@ async function claimIdentity(userId, type, hash) {
 }
 
 // At most one open case per (user, detail).
-function openReviewCase(userId, detail, otherUser) {
-  return ReviewCase.updateOne(
+async function openReviewCase(userId, detail, otherUser) {
+  const result = await ReviewCase.updateOne(
     { user: userId, detail, reason: 'identity_in_use', status: 'open' },
     { $setOnInsert: { otherUser } },
     { upsert: true }
   );
+  if (result.upsertedCount) await verificationChanged(userId);
+  return result;
 }
 
 // Accounts that signed in with Google proved the address to Google (the
@@ -89,6 +99,7 @@ async function autoVerifyGoogleEmail(verification) {
   verification.email.tokenHash = null;
   verification.email.tokenExpiresAt = null;
   await verification.save();
+  await verificationChanged(verification.user);
   return verification;
 }
 
@@ -138,6 +149,7 @@ module.exports = {
   maskEmail,
   maskAccount,
   getVerification,
+  verificationChanged,
   claimIdentity,
   autoVerifyGoogleEmail,
   serializeStatus,

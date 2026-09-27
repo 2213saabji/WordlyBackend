@@ -8,6 +8,7 @@ const { difficultyForDailyWord, difficultyForInfiniteWord } = require('../utils/
 const { hintForWord } = require('../utils/wordHints');
 const { getTierConfig, tierDef } = require('../utils/tierConfig');
 const { loadSettledMembership, creditActivity, scoreFinishedGame, todayProgress } = require('../utils/tiers');
+const { bumpSync, bumpGlobal } = require('../utils/sync');
 
 const MAX_ATTEMPTS = 6;
 const WORD_LENGTH = 5;
@@ -132,6 +133,13 @@ async function submitGuess(req, res) {
 
   if (game.status !== 'in-progress') {
     await applyStatsForFinishedGame(req.userId, game);
+  }
+  // Every guess changes /game/today; a finished game also changes the
+  // stats in /auth/me and puts the player on the daily and weekly boards.
+  if (game.status !== 'in-progress') {
+    await Promise.all([bumpSync(req.userId, ['today', 'me']), bumpGlobal(['daily', 'weekly'])]);
+  } else {
+    await bumpSync(req.userId, 'today');
   }
 
   return res.json({ result, game: serializeGame(game) });

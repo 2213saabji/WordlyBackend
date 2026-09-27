@@ -5,6 +5,14 @@ const User = require('../models/User');
 const Game = require('../models/Game');
 const { todayKey } = require('../utils/dailyWord');
 const { getWeekRange, rankDailyEntries, rankWeeklyEntries, paginate, parsePagination } = require('../utils/leaderboard');
+const { bumpSync, bumpSyncMany } = require('../utils/sync');
+
+// After a group changes, every member's GET /groups/mine is stale. `me` is
+// for the member whose own list of groups (user.groups in /auth/me) changed.
+async function groupChanged(memberIds, { me } = {}) {
+  await bumpSyncMany(memberIds, 'mine');
+  if (me) await bumpSync(me, 'me');
+}
 
 function generateInviteCode() {
   return crypto.randomBytes(4).toString('hex').toUpperCase(); // e.g. 'A1B2C3D4'
@@ -29,6 +37,7 @@ async function createGroup(req, res) {
   });
 
   await User.findByIdAndUpdate(req.userId, { $addToSet: { groups: group._id } });
+  await groupChanged([req.userId], { me: req.userId });
 
   return res.status(201).json({ group });
 }
@@ -48,6 +57,7 @@ async function joinGroup(req, res) {
   group.members.push(req.userId);
   await group.save();
   await User.findByIdAndUpdate(req.userId, { $addToSet: { groups: group._id } });
+  await groupChanged(group.members, { me: req.userId });
 
   return res.json({ group });
 }
@@ -81,8 +91,10 @@ async function updateGroupName(req, res) {
     return res.status(403).json({ message: 'Only the group owner can rename this group' });
   }
 
+  const renamed = group.name !== name.trim();
   group.name = name.trim();
   await group.save();
+  if (renamed) await groupChanged(group.members);
 
   return res.json({ group });
 }
@@ -94,9 +106,12 @@ async function leaveGroup(req, res) {
     return res.status(404).json({ message: 'Group not found' });
   }
 
+  const wasMember = group.members.some((m) => m.toString() === req.userId);
   group.members = group.members.filter((m) => m.toString() !== req.userId);
   await group.save();
   await User.findByIdAndUpdate(req.userId, { $pull: { groups: group._id } });
+  // The remaining members see one fewer; the leaver loses the group.
+  if (wasMember) await groupChanged([...group.members, req.userId], { me: req.userId });
 
   return res.json({ message: 'Left group' });
 }
