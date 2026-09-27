@@ -10,7 +10,7 @@ const TierChange = require('../models/TierChange');
 const Notification = require('../models/Notification');
 const Payout = require('../models/Payout');
 const Game = require('../models/Game');
-const { tierDef, dayTargets } = require('./tierConfig');
+const { tierDef, demotionRule, dayTargets } = require('./tierConfig');
 const { istDayKey, addDaysKey, istDayStart, diffDaysKey } = require('./dailyWord');
 
 const MS_PER_MINUTE = 60 * 1000;
@@ -277,7 +277,8 @@ async function scoreFinishedGame(game, { config, maxAttempts, now = new Date() }
 class SettleConflict extends Error {}
 
 // Settles every unsettled IST day up to `uptoDay` for one membership, in
-// order: the 7-day window, the day counter (stickDays), the Tier 1 reward
+// order: the miss window (the tier's daysToStick in tiers 1–4, 7 days
+// below), the day counter (stickDays), the Tier 1 reward
 // cycle, demotion and promotion. Safe to call from both the reset job and
 // any request (lazy settle) — each write only matches if lastSettledDay is
 // still what this call read, so concurrent settles can't apply a day twice.
@@ -362,7 +363,8 @@ async function settleMembership(initial, config, uptoDay = yesterdayIst()) {
   try {
     for (let day = addDaysKey(persistedDay, 1); day <= uptoDay; day = addDaysKey(day, 1)) {
       const qualified = qualifiedByDay.get(day) === true;
-      state.window = [...state.window, { day, qualified }].slice(-config.demotion.windowDays);
+      const rule = demotionRule(config, state.tier);
+      state.window = [...state.window, { day, qualified }].slice(-rule.windowDays);
       state.missesInWindow = state.window.filter((w) => !w.qualified).length;
       state.stickDays = qualified ? state.stickDays + 1 : 0;
       const def = tierDef(config, state.tier);
@@ -391,20 +393,25 @@ async function settleMembership(initial, config, uptoDay = yesterdayIst()) {
         m = updated;
       }
 
-      if (state.tier <= 7 && state.missesInWindow >= config.demotion.misses) {
+      if (state.tier <= 7 && state.missesInWindow >= rule.misses) {
         await moveTier(state.tier + 1, 'demotion', day);
       } else if (state.tier >= 2 && state.stickDays >= def.daysToStick) {
         await moveTier(state.tier - 1, 'promotion', day);
       } else if (
         !qualified
         && state.tier <= 7
-        && state.missesInWindow === config.demotion.misses - 1
+        && state.missesInWindow === rule.misses - 1
         && day === latestDay // don't send stale risk alerts while catching up old days
       ) {
         const updated = await flush(day);
         if (!updated) throw new SettleConflict();
         m = updated;
-        await notify(m.user, 'demotion_risk', { tier: state.tier, missesInWindow: state.missesInWindow, limit: config.demotion.misses });
+        await notify(m.user, 'demotion_risk', {
+          tier: state.tier,
+          missesInWindow: state.missesInWindow,
+          limit: rule.misses,
+          windowDays: rule.windowDays,
+        });
       }
     }
 

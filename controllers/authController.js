@@ -6,11 +6,16 @@ const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const DeviceSession = require('../models/DeviceSession');
 const TierMembership = require('../models/TierMembership');
-const { sendPasswordResetEmail } = require('../utils/email');
+const PendingSignup = require('../models/PendingSignup');
+const { sendPasswordResetEmail, sendSignupVerificationEmail } = require('../utils/email');
 const { getTierConfig, tierDef } = require('../utils/tierConfig');
+const { safeEqualHex } = require('../utils/verificationCrypto');
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const RESET_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
+const SIGNUP_CODE_TTL_MS = 15 * 60 * 1000; // link and code, 15 minutes
+const SIGNUP_RESEND_INTERVAL_MS = 60 * 1000;
+const SIGNUP_OTP_MAX_ATTEMPTS = 5;
 
 // Audience is read lazily (not at module load) so a missing GOOGLE_CLIENT_ID
 // only breaks googleAuth(), not the whole server at startup.
@@ -51,11 +56,93 @@ function publicUser(user) {
   };
 }
 
-async function signup(req, res) {
-  const { username, email, password, deviceId } = req.body;
+// --- Signup (email verified before the account exists) -------------------
 
-  if (!username || !email || !password || !deviceId) {
-    return res.status(400).json({ message: 'username, email, password and deviceId are required' });
+function signupOtpHash(email, code) {
+  return crypto.createHmac('sha256', process.env.JWT_SECRET).update(`signup:${email}:${code}`).digest('hex');
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function retryAfterSeconds(pending, now) {
+  return Math.ceil((pending.lastSentAt.getTime() + SIGNUP_RESEND_INTERVAL_MS - now) / 1000);
+}
+
+// Stores a fresh link token + code on the pending signup (replacing any
+// earlier ones) and emails them. On a send failure the pending signup is
+// removed so the player can simply try again.
+async function sendSignupCodes(email, fields) {
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+  const now = Date.now();
+
+  await PendingSignup.findOneAndUpdate(
+    { email },
+    {
+      $set: {
+        ...fields,
+        tokenHash: sha256(rawToken),
+        otpHash: signupOtpHash(email, code),
+        expiresAt: new Date(now + SIGNUP_CODE_TTL_MS),
+        otpAttempts: 0,
+        lastSentAt: new Date(now),
+      },
+    },
+    { upsert: true }
+  );
+
+  try {
+    await sendSignupVerificationEmail(email, rawToken, code, SIGNUP_CODE_TTL_MS / 60000);
+  } catch (err) {
+    await PendingSignup.deleteOne({ email });
+    throw err;
+  }
+}
+
+function signupSentResponse(email) {
+  return {
+    message: 'We sent a verification code and link to your email',
+    email,
+    expiresInSeconds: SIGNUP_CODE_TTL_MS / 1000,
+    resendAfterSeconds: SIGNUP_RESEND_INTERVAL_MS / 1000,
+  };
+}
+
+// Turns a confirmed pending signup into a real account and logs this
+// device in. Deleting the pending record first is what makes the link and
+// code single-use: of two concurrent confirms, only one gets the record.
+async function completeSignup(pendingId, deviceId, res) {
+  const pending = await PendingSignup.findOneAndDelete({ _id: pendingId });
+  if (!pending) {
+    return res.status(400).json({ message: 'This signup was already completed or has expired', code: 'SIGNUP_INVALID' });
+  }
+
+  let user;
+  try {
+    user = await User.create({ username: pending.username, email: pending.email, passwordHash: pending.passwordHash });
+  } catch (err) {
+    // The email got an account in the meantime (e.g. Google sign-in).
+    if (err && err.code === 11000) {
+      return res.status(409).json({ message: 'An account with this email already exists', code: 'EMAIL_TAKEN' });
+    }
+    throw err;
+  }
+
+  const token = signToken(user._id);
+  await issueDeviceSession(user._id, deviceId);
+  return res.status(201).json({ token, deviceId, user: publicUser(user) });
+}
+
+// POST /auth/signup  { username, email, password }
+// Doesn't create the account: it emails a 6-digit code and a link, and the
+// account is created when either is confirmed.
+async function signup(req, res) {
+  const { username, email, password } = req.body;
+
+  if (!username || !email || !password) {
+    return res.status(400).json({ message: 'username, email and password are required' });
   }
   if (!EMAIL_REGEX.test(email)) {
     return res.status(400).json({ message: 'Invalid email address' });
@@ -64,19 +151,113 @@ async function signup(req, res) {
     return res.status(400).json({ message: 'Password must be at least 8 characters long' });
   }
 
+  const normalizedEmail = email.toLowerCase();
   // .exists() returns just { _id } off the email index — no need to pull the
   // whole document (passwordHash included) just to check for a duplicate.
-  const existing = await User.exists({ email: email.toLowerCase() });
+  const existing = await User.exists({ email: normalizedEmail });
   if (existing) {
-    return res.status(409).json({ message: 'An account with this email already exists' });
+    return res.status(409).json({ message: 'An account with this email already exists', code: 'EMAIL_TAKEN' });
+  }
+
+  const now = Date.now();
+  const pending = await PendingSignup.findOne({ email: normalizedEmail }).select('lastSentAt').lean();
+  if (pending && now - pending.lastSentAt.getTime() < SIGNUP_RESEND_INTERVAL_MS) {
+    return res.status(429).json({
+      message: 'Wait a minute before asking for another code',
+      code: 'SIGNUP_RATE_LIMITED',
+      retryAfterSeconds: retryAfterSeconds(pending, now),
+    });
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  const user = await User.create({ username, email: email.toLowerCase(), passwordHash });
+  try {
+    await sendSignupCodes(normalizedEmail, { username, passwordHash });
+  } catch (err) {
+    console.error('Failed to send signup verification email:', err);
+    return res.status(502).json({ message: 'Could not send the verification email. Try again.', code: 'EMAIL_SEND_FAILED' });
+  }
 
-  const token = signToken(user._id);
-  await issueDeviceSession(user._id, deviceId);
-  return res.status(201).json({ token, deviceId, user: publicUser(user) });
+  return res.status(202).json(signupSentResponse(normalizedEmail));
+}
+
+// POST /auth/signup/resend  { email }
+async function resendSignup(req, res) {
+  const email = typeof req.body?.email === 'string' ? req.body.email.toLowerCase() : '';
+  if (!email) {
+    return res.status(400).json({ message: 'email is required' });
+  }
+
+  const pending = await PendingSignup.findOne({ email }).select('lastSentAt').lean();
+  if (!pending) {
+    return res.status(404).json({ message: 'No signup is waiting for this email. Sign up again.', code: 'SIGNUP_NOT_FOUND' });
+  }
+  const now = Date.now();
+  if (now - pending.lastSentAt.getTime() < SIGNUP_RESEND_INTERVAL_MS) {
+    return res.status(429).json({
+      message: 'Wait a minute before asking for another code',
+      code: 'SIGNUP_RATE_LIMITED',
+      retryAfterSeconds: retryAfterSeconds(pending, now),
+    });
+  }
+
+  try {
+    await sendSignupCodes(email, {});
+  } catch (err) {
+    console.error('Failed to resend signup verification email:', err);
+    return res.status(502).json({ message: 'Could not send the verification email. Sign up again.', code: 'EMAIL_SEND_FAILED' });
+  }
+  return res.json(signupSentResponse(email));
+}
+
+// POST /auth/signup/verify-otp  { email, code, deviceId }
+async function verifySignupOtp(req, res) {
+  const { deviceId } = req.body;
+  const email = typeof req.body?.email === 'string' ? req.body.email.toLowerCase() : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const invalid = () => res.status(400).json({ message: 'That code is wrong or has expired', code: 'SIGNUP_CODE_INVALID' });
+
+  if (!email || !deviceId) {
+    return res.status(400).json({ message: 'email, code and deviceId are required' });
+  }
+  if (!/^\d{6}$/.test(code)) return invalid();
+
+  // Count the attempt before checking it, atomically, so parallel guesses
+  // can't get past the limit.
+  const pending = await PendingSignup.findOneAndUpdate(
+    { email, expiresAt: { $gt: new Date() }, otpAttempts: { $lt: SIGNUP_OTP_MAX_ATTEMPTS } },
+    { $inc: { otpAttempts: 1 } },
+    { returnDocument: 'after' }
+  ).lean();
+
+  if (!pending) {
+    const exhausted = await PendingSignup.exists({ email, expiresAt: { $gt: new Date() } });
+    if (exhausted) {
+      return res.status(400).json({ message: 'Too many wrong codes. Request a new one.', code: 'SIGNUP_CODE_ATTEMPTS' });
+    }
+    return invalid();
+  }
+  if (!safeEqualHex(pending.otpHash, signupOtpHash(email, code))) return invalid();
+
+  return completeSignup(pending._id, deviceId, res);
+}
+
+// POST /auth/signup/verify/:token  { deviceId }
+// Called by the frontend's /verify-signup/:token page (the emailed link).
+async function verifySignupLink(req, res) {
+  const { token } = req.params;
+  const { deviceId } = req.body;
+  if (!deviceId) {
+    return res.status(400).json({ message: 'deviceId is required' });
+  }
+
+  const pending = await PendingSignup.findOne({ tokenHash: sha256(token), expiresAt: { $gt: new Date() } })
+    .select('_id')
+    .lean();
+  if (!pending) {
+    return res.status(400).json({ message: 'This verification link is invalid or has expired', code: 'SIGNUP_LINK_INVALID' });
+  }
+
+  return completeSignup(pending._id, deviceId, res);
 }
 
 async function login(req, res) {
@@ -319,6 +500,9 @@ async function resetPassword(req, res) {
 
 module.exports = {
   signup,
+  resendSignup,
+  verifySignupOtp,
+  verifySignupLink,
   login,
   googleAuth,
   refresh,

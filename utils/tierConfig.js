@@ -15,7 +15,11 @@ const DEFAULT_TIER_CONFIG = {
     { tier: 8, name: 'Stone', hintsEnabled: true, minActiveMinutes: 0, minGamesCompleted: 0, daysToStick: 3, rewardInr: 0 },
   ],
   scoring: { solveBase: 10, perUnusedGuess: 2, lossPoints: 0, qualifyingDayBonus: 20 },
-  demotion: { misses: 3, windowDays: 7 },
+  // Demote at `misses` missed days in the tier's rolling window. Tiers up to
+  // stickWindowMaxTier use their commitment period (daysToStick) as the
+  // window: 3 misses in 30 days (Diamond, Platinum), 21 (Gold), 14 (Silver).
+  // Tiers below use windowDays.
+  demotion: { misses: 3, windowDays: 7, stickWindowMaxTier: 4 },
   carryInPercent: 20,
   activity: {
     heartbeatMinIntervalMs: 10000, // rate limit: beats closer than this earn nothing
@@ -66,6 +70,16 @@ function tierDef(config, tier) {
   return config.tiers.find((t) => t.tier === tier);
 }
 
+// The demotion rule for `tier`: demote at `misses` missed days within the
+// last `windowDays` settled days in the tier.
+function demotionRule(config, tier) {
+  const { misses, windowDays, stickWindowMaxTier } = config.demotion;
+  return {
+    misses,
+    windowDays: tier <= stickWindowMaxTier ? tierDef(config, tier).daysToStick : windowDays,
+  };
+}
+
 // The targets a day in `tier` is judged against. Snapshotted onto the
 // InfiniteDay document on its first write.
 function dayTargets(config, tier) {
@@ -77,4 +91,4 @@ function dayTargets(config, tier) {
   };
 }
 
-module.exports = { DEFAULT_TIER_CONFIG, getTierConfig, tierDef, dayTargets };
+module.exports = { DEFAULT_TIER_CONFIG, getTierConfig, tierDef, demotionRule, dayTargets };
