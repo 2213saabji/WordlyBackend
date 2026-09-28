@@ -1,13 +1,13 @@
 const Verification = require('../models/Verification');
 const { connectDB } = require('../utils/db');
-const { tokensMatch, isValidSignature, statusEvents } = require('../utils/whatsapp');
+const { setting, tokensMatch, isValidSignature, statusEvents } = require('../utils/whatsapp');
 
 // GET /webhooks/whatsapp — Meta's one-time subscription handshake, when the
 // webhook URL is saved in the app dashboard. Meta sends hub.mode=subscribe,
 // hub.verify_token (what was typed into the dashboard) and hub.challenge;
 // echoing the challenge back as plain text confirms the endpoint.
 function verifyWebhook(req, res) {
-  const expected = process.env.WHATSAPP_VERIFY_TOKEN;
+  const expected = setting('WHATSAPP_VERIFY_TOKEN');
   if (!expected) {
     console.error('WhatsApp webhook: WHATSAPP_VERIFY_TOKEN is not set');
     return res.sendStatus(503);
@@ -26,7 +26,7 @@ function verifyWebhook(req, res) {
 // Only message statuses for OTPs are used: they record whether the code was
 // delivered, read, or failed (e.g. the number isn't on WhatsApp).
 async function receiveWebhook(req, res) {
-  const appSecret = process.env.WHATSAPP_APP_SECRET;
+  const appSecret = setting('WHATSAPP_APP_SECRET');
   if (!appSecret) {
     // Acknowledge so Meta doesn't keep retrying, but don't trust unsigned data.
     console.error('WhatsApp webhook: WHATSAPP_APP_SECRET is not set; ignoring the event');

@@ -19,6 +19,18 @@
 
 const crypto = require('crypto');
 
+// TEMPORARY: hardcoded demo values (config/whatsappDemo.js), used for any
+// setting the environment doesn't provide. WHATSAPP_DEMO_CONFIG=off ignores
+// them (the tests do). Delete the file and this line to go env-only again.
+const DEMO = process.env.WHATSAPP_DEMO_CONFIG === 'off' ? {} : require('../config/whatsappDemo');
+
+// A WhatsApp setting: the environment variable if set, else the demo value.
+function setting(name) {
+  return process.env[name] || DEMO[name] || undefined;
+}
+// All settings as one object, e.g. settings().WHATSAPP_ACCESS_TOKEN.
+const settings = () => new Proxy({}, { get: (_, name) => setting(String(name)) });
+
 const DEFAULT_API_VERSION = 'v23.0';
 const SEND_TIMEOUT_MS = 10000;
 
@@ -38,7 +50,7 @@ const ERROR = {
 };
 
 function isWhatsAppConfigured() {
-  const e = process.env;
+  const e = settings();
   return Boolean(e.WHATSAPP_ACCESS_TOKEN && e.WHATSAPP_PHONE_NUMBER_ID && e.WHATSAPP_OTP_TEMPLATE);
 }
 
@@ -47,7 +59,7 @@ function isWhatsAppConfigured() {
 function bodyParams(code, { name } = {}) {
   let spec = ['{code}'];
   try {
-    const parsed = JSON.parse(process.env.WHATSAPP_OTP_BODY_PARAMS || 'null');
+    const parsed = JSON.parse(setting('WHATSAPP_OTP_BODY_PARAMS') || 'null');
     if (Array.isArray(parsed) && parsed.length && parsed.every((p) => typeof p === 'string')) spec = parsed;
   } catch {
     console.error('WHATSAPP_OTP_BODY_PARAMS is not a JSON array of strings; using ["{code}"]');
@@ -65,7 +77,7 @@ function bodyParams(code, { name } = {}) {
 // Returns { messageId } (the wamid Meta's webhook reports statuses for).
 // Throws WhatsAppSendError if Meta rejects the request.
 async function sendOtpWhatsApp(toE164, code, vars = {}) {
-  const e = process.env;
+  const e = settings();
   const version = e.WHATSAPP_API_VERSION || DEFAULT_API_VERSION;
   const components = [{ type: 'body', parameters: bodyParams(code, vars) }];
   // Authentication templates with a copy-code or one-tap button need the
@@ -156,6 +168,7 @@ function statusEvents(payload) {
 }
 
 module.exports = {
+  setting,
   ERROR,
   STATUS_RANK,
   WhatsAppSendError,
