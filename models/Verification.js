@@ -27,6 +27,23 @@ const verificationSchema = new mongoose.Schema(
       otpExpiresAt: { type: Date, default: null },
       otpAttempts: { type: Number, default: 0 },
       otpSentAt: { type: [Date], default: [] }, // recent sends, for the 3-per-15-min limit
+      // How the outstanding code was sent, and (WhatsApp only) its delivery
+      // status as reported by Meta's webhook — see utils/whatsapp.js.
+      otpChannel: { type: String, enum: ['whatsapp', 'sms', null], default: null },
+      otpMessageId: { type: String, default: null }, // WhatsApp message id (wamid.…)
+      otpDelivery: {
+        type: new mongoose.Schema(
+          {
+            status: { type: String, enum: ['accepted', 'sent', 'delivered', 'read', 'failed'] },
+            rank: Number, // accepted 0 < sent 1 < delivered 2 < read 3 < failed 4; webhooks can arrive out of order
+            at: Date,
+            errorCode: { type: Number, default: null },
+            errorTitle: { type: String, default: null },
+          },
+          { _id: false }
+        ),
+        default: null,
+      },
     },
 
     email: {
@@ -57,5 +74,7 @@ const verificationSchema = new mongoose.Schema(
 
 // POST /verification/email/confirm looks the link token up by its hash.
 verificationSchema.index({ 'email.tokenHash': 1 }, { partialFilterExpression: { 'email.tokenHash': { $type: 'string' } } });
+// The WhatsApp webhook looks the code's message up by its id.
+verificationSchema.index({ 'mobile.otpMessageId': 1 }, { partialFilterExpression: { 'mobile.otpMessageId': { $type: 'string' } } });
 
 module.exports = mongoose.model('Verification', verificationSchema);

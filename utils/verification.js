@@ -119,12 +119,29 @@ async function openReviewCaseFor(userId) {
   return ReviewCase.findOne({ user: userId, status: 'open' }).sort({ createdAt: -1 }).lean();
 }
 
+// While a code is outstanding: how it was sent and, for WhatsApp, whether
+// Meta delivered it. `reason: 'not_on_whatsapp'` lets the app suggest
+// another number (Meta error 131026 is almost always that).
+function otpDeliveryView(mobile) {
+  const view = { channel: mobile.otpChannel || null };
+  const d = mobile.otpDelivery;
+  if (d && d.status) {
+    view.delivery = { status: d.status };
+    if (d.status === 'failed') view.delivery.reason = d.errorCode === 131026 ? 'not_on_whatsapp' : 'failed';
+  }
+  return view;
+}
+
 // The GET /verification/status body (also returned by every step).
 async function serializeStatus(v) {
   const reviewCase = await openReviewCaseFor(v.user);
   const complete = STEPS.every((s) => v[s].status === 'verified');
   return {
-    mobile: { status: v.mobile.status, masked: v.mobile.status === 'pending' ? v.mobile.otpMasked : v.mobile.masked },
+    mobile: {
+      status: v.mobile.status,
+      masked: v.mobile.status === 'pending' ? v.mobile.otpMasked : v.mobile.masked,
+      ...(v.mobile.status === 'pending' ? otpDeliveryView(v.mobile) : {}),
+    },
     email: { status: v.email.status, masked: v.email.masked, method: v.email.method },
     bank: { status: v.bank.status, masked: v.bank.masked, ifsc: v.bank.ifsc, nameMatch: v.bank.nameMatch },
     reviewCase: reviewCase ? { status: reviewCase.status, reason: reviewCase.reason, detail: reviewCase.detail } : null,

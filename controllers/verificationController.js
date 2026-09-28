@@ -5,7 +5,9 @@ const User = require('../models/User');
 const { getTierConfig } = require('../utils/tierConfig');
 const { loadSettledMembership } = require('../utils/tiers');
 const { sendEmailVerificationEmail } = require('../utils/email');
-const { sendOtpSms, SmsNotConfiguredError } = require('../utils/sms');
+const { SmsNotConfiguredError } = require('../utils/sms');
+const { sendOtp } = require('../utils/otpDelivery');
+const { WhatsAppSendError, ERROR: WHATSAPP_ERROR } = require('../utils/whatsapp');
 const { verifyBankAccount } = require('../utils/pennyDrop');
 const { identityHash, otpHash, safeEqualHex, encryptJson, tokenHash } = require('../utils/verificationCrypto');
 const {
@@ -84,8 +86,11 @@ async function sendMobileOtp(req, res) {
   }
 
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+  let sent;
   try {
-    await sendOtpSms(phone, code);
+    // WhatsApp when configured, otherwise SMS (utils/otpDelivery.js).
+    const user = await User.findById(req.userId).select('username').lean();
+    sent = await sendOtp(phone, code, { name: user && user.username });
   } catch (err) {
     if (err instanceof SmsNotConfiguredError) {
       return res.status(503).json({
@@ -93,7 +98,16 @@ async function sendMobileOtp(req, res) {
         code: 'SMS_PROVIDER_NOT_CONFIGURED',
       });
     }
-    console.error('OTP SMS send failed:', err);
+    if (err instanceof WhatsAppSendError && err.code === WHATSAPP_ERROR.RECIPIENT_NOT_ALLOWED) {
+      // Only while the WhatsApp app is in development mode: Meta delivers
+      // only to numbers added as test recipients.
+      console.error('OTP WhatsApp send refused, recipient not in the test list:', err.message);
+      return res.status(502).json({
+        message: "This number can't receive WhatsApp codes from us yet. Try another number.",
+        code: 'WHATSAPP_RECIPIENT_NOT_ALLOWED',
+      });
+    }
+    console.error(`OTP ${err instanceof WhatsAppSendError ? 'WhatsApp' : 'SMS'} send failed:`, err);
     return res.status(502).json({ message: 'Could not send the code. Try again.', code: 'OTP_SEND_FAILED' });
   }
 
@@ -106,6 +120,10 @@ async function sendMobileOtp(req, res) {
   v.mobile.otpExpiresAt = new Date(now + OTP_TTL_MS);
   v.mobile.otpAttempts = 0;
   v.mobile.otpSentAt = [...recentSends, new Date(now)];
+  v.mobile.otpChannel = sent.channel;
+  v.mobile.otpMessageId = sent.messageId;
+  // WhatsApp reports delivery later through the webhook; start at "accepted".
+  v.mobile.otpDelivery = sent.messageId ? { status: 'accepted', rank: 0, at: new Date(now) } : null;
   await v.save();
   await verificationChanged(req.userId);
 
@@ -146,6 +164,9 @@ async function verifyMobileOtp(req, res) {
   m.otpCodeHash = null;
   m.otpExpiresAt = null;
   m.otpAttempts = 0;
+  m.otpChannel = null;
+  m.otpMessageId = null;
+  m.otpDelivery = null;
   await v.save();
   await verificationChanged(req.userId);
 
