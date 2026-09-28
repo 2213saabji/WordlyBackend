@@ -8,7 +8,7 @@
 // stay in its git history, so afterwards also reset the Meta app secret and
 // replace the access token (use a permanent System User token).
 module.exports = {
-  WHATSAPP_ACCESS_TOKEN: 'EAAWdSZBvy4R4BSuyUDGKAR9yjhwrLb5gqEDiOykVVZASKfPgXmFOMpYyx5QtrLVuw7prW1uf7h8EJgsXpaDEwCz3BFEihXbGvqoasow5J8lz8Cv0ZBHmKJK6WpaZBJ8AZAeFl64DPvbO6rOs1UyUBTBl6kJx9ip727qnw6JucKn5kPYM67Ljs7lMXg04tRarBNjzZBDu7EmBF8hF81axPKEZCFsYpsRyPgMiMpIZAnD5096EgiWuhZCW9VKYYlOz8ycl5Q0cXU38zu9Hqsuq8mX9WiacZD',
+  WHATSAPP_ACCESS_TOKEN: 'EAAWdSZBvy4R4BSh4lStCGyNZC2TJlJLefYsMlAiS8cZBVczimqRg3ZA7ArAHJJD8KSJEwBxmztq2QZB5zB1TGRFS9UPuYBjTLC9xOAVcJTj8bSXjlrUfUlrspgokYf1KngAsBNlZA2HrOFtEMdNJDZCHGDO8FwhfhGZBnNawK6IwjOHN9NoPtls8RoRId6xXBQZDZD',
   WHATSAPP_PHONE_NUMBER_ID: '1337820409416578',
   // Demo template (Meta sample): {{1}} name, {{2}} code, {{3}} date. Swap for
   // a real Authentication template later.
