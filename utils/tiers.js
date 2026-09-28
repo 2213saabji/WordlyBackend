@@ -127,7 +127,25 @@ async function evaluateQualification(dayDoc, config) {
     { $inc: { score: bonus, qualifyingDaysInTier: 1 }, $set: { scoreReachedAt: now } }
   );
   await Promise.all([bumpSync(dayDoc.user, 'infinite'), bumpGlobal('infiniteBoard')]);
+  await promoteIfEarnedToday(dayDoc, config);
   return bonus;
+}
+
+// A promotion earned today happens now instead of at the nightly reset: if
+// the day that just qualified is the one that completes the tier's counter,
+// settle today right away. It's the same settle the reset would run, so the
+// score carry-in, window, rank at entry and notifications are identical;
+// the reset then simply finds today already settled. Demotions stay nightly
+// (a miss is only known once the day is over).
+async function promoteIfEarnedToday(dayDoc, config) {
+  const today = istDayKey();
+  if (dayDoc.day !== today) return;
+  const m = await TierMembership.findOne({ user: dayDoc.user }).lean();
+  // Only for the tier the day was played in, with every earlier day
+  // settled (each request settles those first), so today is the next one.
+  if (!m || m.tier !== dayDoc.tier || m.tier < 2 || m.lastSettledDay !== addDaysKey(today, -1)) return;
+  if (m.stickDays + 1 < tierDef(config, m.tier).daysToStick) return;
+  await settleMembership(m, config, today);
 }
 
 // Today's progress card. `dayDoc` may be null (nothing played yet today).
@@ -290,9 +308,15 @@ async function scoreFinishedGame(game, { config, maxAttempts, now = new Date() }
   return {
     pointsAwarded: points,
     qualifyingBonusAwarded: bonus,
+    // After an instant promotion (promoteIfEarnedToday) these are already
+    // the new tier's: the carried-in score and the rank there.
     score: fresh.score,
     rank,
     tierSize: size,
+    // Set when this round's qualifying day completed the counter and moved
+    // the player up, so the app can react at once (e.g. open verification
+    // on reaching Diamond).
+    promotion: fresh.tier < membership.tier ? { fromTier: membership.tier, toTier: fresh.tier } : null,
     today: todayProgress(finalDay, fresh.tier, config, countedDay),
   };
 }
@@ -377,9 +401,9 @@ async function settleMembership(initial, config, uptoDay = yesterdayIst()) {
       touched.add('me').add('tierChanges'); // /auth/me carries the tier badge
       if (fromTier === 1 || toTier === 1) touched.add('rewards');
       await notify(m.user, reason, change);
-      // Verification is only for payouts, so only prompt for it while
-      // rewards are switched on.
-      if (reason === 'promotion' && toTier === 1 && config.rewardsEnabled) {
+      // Reaching Diamond starts the mobile / email / bank verification, so
+      // it's ready when payouts are switched on.
+      if (reason === 'promotion' && toTier === 1) {
         await notify(m.user, 'verification_needed', { tier: 1 });
       }
       stats[reason === 'promotion' ? 'promoted' : 'demoted'] += 1;
