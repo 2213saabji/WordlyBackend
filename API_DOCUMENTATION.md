@@ -488,9 +488,16 @@ Verification is only for the Diamond (Tier 1) ₹100 reward. It isn't part of lo
 
 ### Step 1 · Mobile number
 
-> **Not live yet:** no SMS provider has been chosen, so `POST /verification/mobile/otp` currently returns `503 { "code": "SMS_PROVIDER_NOT_CONFIGURED" }`. Show "Mobile verification is coming soon" for that code. Everything else in this step is built, and starts working as soon as a provider is plugged in on the backend. The frontend won't need any changes then.
+> **Codes are sent by WhatsApp** when WhatsApp is configured on the backend, otherwise by SMS. If neither is configured, `POST /verification/mobile/otp` returns `503 { "code": "SMS_PROVIDER_NOT_CONFIGURED" }`. Show "Mobile verification is coming soon" for that code.
 
-**`POST /verification/mobile/otp`** `{ "phone": "+14155552671" }` sends a 6-digit code by SMS.
+**`POST /verification/mobile/otp`** `{ "phone": "+14155552671" }` sends a 6-digit code, by WhatsApp or SMS.
+- While a code is outstanding, `mobile` in the response (and in `GET /verification/status`) shows how it was sent, and for WhatsApp whether it arrived:
+  ```json
+  "mobile": { "status": "pending", "masked": "+•••••••••2671", "channel": "whatsapp",
+              "delivery": { "status": "delivered" } }
+  ```
+  `delivery.status` moves from `accepted` → `sent` → `delivered` → `read`, updated by Meta's webhook within seconds. `failed` comes with `reason`: `not_on_whatsapp` (the number has no WhatsApp) or `failed`. Re-fetch `GET /verification/status` a few seconds after sending to show "Code sent on WhatsApp ✓✓". On `not_on_whatsapp`, suggest checking the number. For SMS there is no `delivery`.
+- `502 { "code": "WHATSAPP_RECIPIENT_NOT_ALLOWED" }`: the WhatsApp account is still in test mode and this number isn't one of its test recipients. It only happens before go-live.
 - **Numbers from any country are accepted**, in international (E.164) format: `+`, country code, then the number. Spaces, dashes, dots and brackets are removed first, so `+1 (415) 555-2671` is fine. A number without the `+` country code gets `400 PHONE_INVALID`.
 - The code expires in **10 minutes**, and the response includes `"expiresInSeconds": 600`. The step becomes `pending`.
 - **Limit: 3 codes per 15 minutes.** The 4th gets `429 { "code": "OTP_RATE_LIMITED", "retryAfterSeconds": 540 }`.
@@ -537,8 +544,9 @@ The email address is always the one on the player's account. The player doesn't 
 | `PHONE_INVALID` | 400 | Not an international (E.164) number |
 | `OTP_RATE_LIMITED` | 429 | More than 3 codes in 15 minutes (`retryAfterSeconds` included) |
 | `OTP_INVALID` | 400 | Wrong, expired or used code, or 5 wrong tries |
-| `SMS_PROVIDER_NOT_CONFIGURED` | 503 | Mobile verification isn't live yet |
-| `OTP_SEND_FAILED` | 502 | The SMS provider failed; retry |
+| `SMS_PROVIDER_NOT_CONFIGURED` | 503 | Mobile verification isn't live yet (neither WhatsApp nor SMS configured) |
+| `OTP_SEND_FAILED` | 502 | WhatsApp or the SMS provider failed; retry |
+| `WHATSAPP_RECIPIENT_NOT_ALLOWED` | 502 | WhatsApp is in test mode and this number isn't a test recipient |
 | `EMAIL_RATE_LIMITED` | 429 | Link resent within a minute (`retryAfterSeconds` included) |
 | `EMAIL_SEND_FAILED` | 502 | The email couldn't be sent; retry |
 | `VERIFICATION_TOKEN_INVALID` | 400 | Bad, expired or already-used email link |

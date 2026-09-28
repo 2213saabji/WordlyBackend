@@ -23,6 +23,7 @@ const notificationRoutes = require('./routes/notificationRoutes');
 const rewardRoutes = require('./routes/rewardRoutes');
 const verificationRoutes = require('./routes/verificationRoutes');
 const syncRoutes = require('./routes/syncRoutes');
+const webhookRoutes = require('./routes/webhookRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 8888;
@@ -100,6 +101,9 @@ app.use((req, res, next) => {
 
 // Apply CORS to every route, including preflight requests.
 app.use(cors(corsOptions));
+// Before express.json(): webhook signatures are checked on the raw body.
+// Outside /api, so the DB is connected only by the handlers that need it.
+app.use('/webhooks', webhookRoutes);
 app.use(express.json());
 
 // Test Route
