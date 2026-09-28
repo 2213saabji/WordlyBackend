@@ -1,7 +1,7 @@
 // TEMPORARY — WhatsApp demo settings, hardcoded at the owner's request while
-// the Meta account is being verified. Each value is used only when the
-// matching environment variable isn't set (see setting() in
-// utils/whatsapp.js), so environment variables always win.
+// the Meta account is being verified. For now these values take precedence
+// over environment variables (see setting() in utils/whatsapp.js), so stale
+// values in the hosting settings can't override them.
 //
 // To undo: delete this file (and its require in utils/whatsapp.js) once the
 // values are back in the environment. This repo is public and these values
