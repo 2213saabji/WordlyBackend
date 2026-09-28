@@ -2,6 +2,8 @@
 // delivery statuses, and POST /verification/mobile/otp choosing WhatsApp.
 // fetch and the models are stubbed: nothing reaches Meta or a database.
 process.env.VERIFICATION_SECRET = process.env.VERIFICATION_SECRET || 'x'.repeat(40);
+// Tests control every setting through process.env; ignore the demo values.
+process.env.WHATSAPP_DEMO_CONFIG = 'off';
 // Pretend the DB is connected, for connectDB() in the webhook handler.
 globalThis.__mongooseConn = { conn: {}, promise: Promise.resolve({}) };
 
