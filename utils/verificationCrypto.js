@@ -1,11 +1,19 @@
 const crypto = require('crypto');
 
-// Every key used by verification is derived from one env secret,
+// Every key used by verification is derived from one secret,
 // VERIFICATION_SECRET (a long random string, e.g. `openssl rand -hex 32`).
 // Changing it makes existing encrypted bank records unreadable and existing
 // identity hashes stop matching, so set it once and keep it.
 const MIN_SECRET_LENGTH = 32;
 const keyCache = new Map();
+
+// TEMPORARY, at the owner's request for testing: the secret is hardcoded as
+// a fallback for when the VERIFICATION_SECRET environment variable isn't set
+// (an env value always wins). This repo is public, so anyone can read this
+// key: don't collect real players' bank details while it's here. Move it to
+// the environment with the SAME value (changing it breaks existing hashes and
+// encrypted records) and delete this constant.
+const FALLBACK_VERIFICATION_SECRET = '4bbc795935ac5737934f78bfc2edf31a2c0cf1a28a65a66154b683a8e2458804';
 
 function configError() {
   const err = new Error('Verification is not configured on the server');
@@ -15,7 +23,7 @@ function configError() {
 
 function deriveKey(purpose) {
   if (keyCache.has(purpose)) return keyCache.get(purpose);
-  const secret = process.env.VERIFICATION_SECRET;
+  const secret = process.env.VERIFICATION_SECRET || FALLBACK_VERIFICATION_SECRET;
   if (!secret || secret.length < MIN_SECRET_LENGTH) {
     console.error(`VERIFICATION_SECRET must be set (at least ${MIN_SECRET_LENGTH} characters)`);
     throw configError();
