@@ -200,11 +200,13 @@ Same `game` shape and semantics as daily mode above (`mode: "infinite"` instead 
   ```json
   { "result": [1,1,0,-1,1], "game": { "...": "..." },
     "tier": { "pointsAwarded": 16, "qualifyingBonusAwarded": 20, "score": 632, "rank": 14, "tierSize": 212,
+              "promotion": null,
               "today": { "day": "2026-09-26", "activeMinutes": 41, "targetMinutes": 35, "gamesCompleted": 12,
                          "targetGames": 12, "qualified": true, "completionRatio": 1, "resetsAt": "2026-09-26T18:30:00.000Z" } },
     "today": { "...": "same as tier.today" } }
   ```
   Optional body field `deviceId` is stored for anti-abuse checks.
+- **Instant promotion:** if this round makes today qualify **and** that completes the tier's day count (e.g. day 30 of 30 in Platinum), the player moves up **right away** instead of at midnight. `tier.promotion` is then `{ "fromTier": 2, "toTier": 1 }`, and `score` / `rank` / `tierSize` are already the new tier's. The same move shows as `lastChange` in `/infinite/me`, with the usual `promotion` notification (and `verification_needed` on reaching Diamond). Demotions still happen at the nightly reset. It also works when the day qualifies through active time (a heartbeat or round start) rather than a finished round, but only a finished round's response carries `promotion`.
 - **Active time** comes from these game calls: each round start and guess credits the time since the previous one, capped at 2 minutes per gap. Opening `/current` on a round that already exists credits nothing.
 - `POST /game/infinite/new` (skip): a round abandoned **after at least one guess** counts as a completed loss (0 points). A round abandoned before any guess doesn't count.
 - `POST /game/infinite/hint`: `200 { "hint": "..." }` in Tiers 7–8. `403 { "message": "Hints are disabled in your tier", "code": "HINTS_DISABLED_FOR_TIER" }` in Tiers 1–6. `400` if no game is in progress.
@@ -445,7 +447,7 @@ Types sent today and their `data`:
 - `promotion`, `demotion`: `fromTier`, `toTier`, `reason`, `oldScore`, `oldRank`, `oldTierSize`, `carriedScore`, `rankAtEntry`, `newTierSize`.
 - `demotion_risk` (2 misses in the window): `tier`, `missesInWindow`, `limit`, `windowDays`.
 - `reward_earned` (only when rewards are on): `cycle`, `amountInr`, `day`.
-- `verification_needed` (on promotion to Tier 1, only when rewards are on): `tier`.
+- `verification_needed` (on promotion to Tier 1): `tier`. Open the verification flow at the mobile step.
 
 `payout_sent` and `payout_failed` are reserved and not sent yet. Mark as read with `{ "ids": ["…"] }` (max 100), which returns `{ "updated": 2 }`.
 
