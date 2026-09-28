@@ -19,14 +19,18 @@
 
 const crypto = require('crypto');
 
-// TEMPORARY: hardcoded demo values (config/whatsappDemo.js), used for any
-// setting the environment doesn't provide. WHATSAPP_DEMO_CONFIG=off ignores
-// them (the tests do). Delete the file and this line to go env-only again.
+// TEMPORARY: hardcoded demo values (config/whatsappDemo.js). For now they
+// take precedence over environment variables, so stale values left in the
+// hosting settings (e.g. an expired token in Vercel) can't override them;
+// the environment is only used for settings the file doesn't define.
+// WHATSAPP_DEMO_CONFIG=off ignores the file (the tests do). To go env-only
+// again, delete the file and this line.
 const DEMO = process.env.WHATSAPP_DEMO_CONFIG === 'off' ? {} : require('../config/whatsappDemo');
 
-// A WhatsApp setting: the environment variable if set, else the demo value.
+// A WhatsApp setting: the demo value if the file has one, else the
+// environment variable.
 function setting(name) {
-  return process.env[name] || DEMO[name] || undefined;
+  return DEMO[name] || process.env[name] || undefined;
 }
 // All settings as one object, e.g. settings().WHATSAPP_ACCESS_TOKEN.
 const settings = () => new Proxy({}, { get: (_, name) => setting(String(name)) });
