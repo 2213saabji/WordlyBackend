@@ -192,8 +192,11 @@ async function infiniteContext(userId) {
   };
 }
 
+// Returns the round, plus today's InfiniteDay when creating it credited
+// activity (null when an existing round was returned).
 async function getOrCreateCurrentInfiniteGame(userId, ctx) {
   let game = await Game.findOne({ user: userId, mode: 'infinite', status: 'in-progress' });
+  let dayDoc = null;
   if (!game) {
     const roundIndex = await Game.countDocuments({ user: userId, mode: 'infinite' });
     game = await Game.create({
@@ -206,15 +209,23 @@ async function getOrCreateCurrentInfiniteGame(userId, ctx) {
     // Starting a round is a game action: it credits the time since the
     // previous one (the result screen, moving to the next word), capped.
     // Only on creation — returning an existing round is a page load, not play.
-    await creditActivity({ userId, tier: ctx.tier, config: ctx.config, source: 'game' });
+    ({ dayDoc } = await creditActivity({ userId, tier: ctx.tier, config: ctx.config, source: 'game' }));
   }
-  return game;
+  return { game, dayDoc };
+}
+
+// Today's progress card for Infinite responses, from a day document already
+// in hand or, failing that, one read.
+async function infiniteToday(userId, ctx, dayDoc) {
+  const today = istDayKey();
+  const doc = dayDoc && dayDoc.day === today ? dayDoc : await InfiniteDay.findOne({ user: userId, day: today }).lean();
+  return todayProgress(doc, ctx.tier, ctx.config, today);
 }
 
 async function getCurrentInfinite(req, res) {
   const ctx = await infiniteContext(req.userId);
-  const game = await getOrCreateCurrentInfiniteGame(req.userId, ctx);
-  return res.json({ game: serializeGame(game, ctx.view) });
+  const { game, dayDoc } = await getOrCreateCurrentInfiniteGame(req.userId, ctx);
+  return res.json({ game: serializeGame(game, ctx.view), today: await infiniteToday(req.userId, ctx, dayDoc) });
 }
 
 // Abandons any in-progress round for this user and starts a fresh one —
@@ -240,12 +251,12 @@ async function newInfiniteGame(req, res) {
     }
   }
 
-  const game = await getOrCreateCurrentInfiniteGame(req.userId, ctx);
-  const today = istDayKey();
-  const dayDoc = await InfiniteDay.findOne({ user: req.userId, day: today }).lean();
+  // Any abandoned round was scored above, so the day document the new
+  // round's credit returns is already up to date.
+  const { game, dayDoc } = await getOrCreateCurrentInfiniteGame(req.userId, ctx);
   return res.status(201).json({
     game: serializeGame(game, ctx.view),
-    today: todayProgress(dayDoc, ctx.tier, ctx.config, today),
+    today: await infiniteToday(req.userId, ctx, dayDoc),
   });
 }
 
@@ -313,7 +324,7 @@ async function submitInfiniteGuess(req, res) {
   await game.save();
 
   // A guess is a game action: it credits the time since the previous one.
-  await creditActivity({ userId: req.userId, tier: ctx.tier, config: ctx.config, source: 'game' });
+  const { dayDoc } = await creditActivity({ userId: req.userId, tier: ctx.tier, config: ctx.config, source: 'game' });
 
   // Deliberately no applyStatsForFinishedGame call — infinite rounds don't
   // affect user.stats or streaks. They score on the tier board instead.
@@ -323,6 +334,13 @@ async function submitInfiniteGuess(req, res) {
     if (tier) response.tier = tier;
   }
   response.game = serializeGame(game, ctx.view);
+  // Every guess returns today's card, so "Active time" updates live. When
+  // the round ended, scoring already built it (games completed included);
+  // otherwise the credit's day document is current. A round scored by a
+  // concurrent request has neither, so read it.
+  response.today = response.tier
+    ? response.tier.today
+    : await infiniteToday(req.userId, ctx, game.status === 'in-progress' ? dayDoc : null);
   return res.json(response);
 }
 

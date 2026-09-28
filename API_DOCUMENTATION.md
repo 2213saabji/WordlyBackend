@@ -191,15 +191,22 @@ Same `game` shape and semantics as daily mode above (`mode: "infinite"` instead 
 - **`difficulty` is not included while the game is in progress.** It's included once the game ends.
 - Extra fields: `id` (the round id — send it as `gameId` in heartbeats; also present on daily games), `hintsEnabled` (the player's current tier allows hints), `hintRevealed`, `pointsAwarded`, `countedDay` (IST day the game counted toward), `tierAtCompletion`.
 - `date` is the IST day the game started.
-- `POST /game/infinite/guess`: when the guess ends the game, the response also has a `tier` block:
+- **`today`, the progress card** (same shape as `today` in `GET /infinite/me`), is included in the response of **every** `POST /game/infinite/guess`, and of `GET /game/infinite/current` and `POST /game/infinite/new`. Use it to keep "Active time" up to date:
+  ```json
+  "today": { "day": "2026-09-26", "activeMinutes": 19, "targetMinutes": 25, "gamesCompleted": 6, "targetGames": 9,
+             "qualified": false, "completionRatio": 0.69, "resetsAt": "2026-09-26T18:30:00.000Z" }
+  ```
+- `POST /game/infinite/guess`: when the guess ends the game, the response also has a `tier` block (its `today` is the same card as the top-level `today`):
   ```json
   { "result": [1,1,0,-1,1], "game": { "...": "..." },
     "tier": { "pointsAwarded": 16, "qualifyingBonusAwarded": 20, "score": 632, "rank": 14, "tierSize": 212,
               "today": { "day": "2026-09-26", "activeMinutes": 41, "targetMinutes": 35, "gamesCompleted": 12,
-                         "targetGames": 12, "qualified": true, "completionRatio": 1, "resetsAt": "2026-09-26T18:30:00.000Z" } } }
+                         "targetGames": 12, "qualified": true, "completionRatio": 1, "resetsAt": "2026-09-26T18:30:00.000Z" } },
+    "today": { "...": "same as tier.today" } }
   ```
   Optional body field `deviceId` is stored for anti-abuse checks.
-- `POST /game/infinite/new` (skip): a round abandoned **after at least one guess** counts as a completed loss (0 points). A round abandoned before any guess doesn't count. The response adds `today` (same shape as above).
+- **Active time** comes from these game calls: each round start and guess credits the time since the previous one, capped at 2 minutes per gap. Opening `/current` on a round that already exists credits nothing.
+- `POST /game/infinite/new` (skip): a round abandoned **after at least one guess** counts as a completed loss (0 points). A round abandoned before any guess doesn't count.
 - `POST /game/infinite/hint`: `200 { "hint": "..." }` in Tiers 7–8. `403 { "message": "Hints are disabled in your tier", "code": "HINTS_DISABLED_FOR_TIER" }` in Tiers 1–6. `400` if no game is in progress.
 
 ### How stats update
@@ -406,8 +413,8 @@ The player's tier status and today's progress card.
 ```
 Before the first completed game: Tier 8 defaults with `rank: null`. `reward` is filled only in Tier 1 (same shape as `GET /rewards/me`).
 
-### `POST /infinite/activity/heartbeat`
-Send every **15 s** while an Infinite game screen is visible and the player has given input in the last 60 s. The server decides how much time to credit: it only counts time on a visible screen, with recent input, and a guess or game start in the last 3 minutes. Beats less than 10 s apart are ignored.
+### `POST /infinite/activity/heartbeat` (deprecated)
+**Don't call this in new code.** Active time now comes from game calls (see Infinite mode in section 2). The endpoint stays only for old app versions and will be removed. Old behaviour: send every **15 s** while an Infinite game screen is visible and the player has given input in the last 60 s. The server decides how much time to credit: it only counts time on a visible screen, with recent input, and a guess or game start in the last 3 minutes. Beats less than 10 s apart are ignored.
 ```json
 // request
 { "gameId": "66f…", "visible": true, "lastInputAgoMs": 4200, "deviceId": "d-…" }
