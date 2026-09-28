@@ -590,6 +590,8 @@ Auth required. Tells the app which APIs have data that changed since the app las
 
 ## Notes for the frontend build
 
+- **Timing headers (for diagnosing slow requests):** every response has `Server-Timing: app;dur=<ms>, db-wait;dur=<ms>`. That's the backend's own handling time, and the part of it spent waiting for the database connection. The first request a new server instance handles (a cold start) also has `boot;dur=<ms>` and `db-connect;dur=<ms>`, plus `X-Cold-Start: 1`. Both headers are readable from JS (`response.headers.get('server-timing')`). `GET /health/db` returns the same breakdown as JSON under `timing`, plus DNS and ping times.
+
 - **CORS** is open (`cors()` with no restrictions) so the frontend can call this API from any origin during development. Tighten this (`origin: '<your frontend URL>'`) before production if needed — flag that to the backend if you deploy to a fixed domain.
 - **Reset-password route**: make sure a `/reset-password/:token` page exists on the frontend and calls `POST /auth/reset-password/:token`, since that's the link users receive by email.
 - **Verify-signup route**: make sure a `/verify-signup/:token` page exists on the frontend and calls `POST /auth/signup/verify/:token` with the device's `deviceId`, since that's the link in the signup email. On `201`, store the token and treat the player as logged in.

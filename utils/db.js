@@ -12,6 +12,15 @@ let cached = globalThis.__mongooseConn;
 if (!cached) {
   cached = globalThis.__mongooseConn = { conn: null, promise: null };
 }
+// Cold-start diagnostics (see /health/db and the Server-Timing header):
+// how long this instance's connection took, in ms since process start.
+if (!cached.timing) {
+  cached.timing = { startedAtMs: null, connectMs: null, failures: 0 };
+}
+
+function dbTiming() {
+  return { ...cached.timing };
+}
 
 async function connectDB() {
   if (cached.conn && mongoose.connection.readyState === 1) {
@@ -28,6 +37,8 @@ async function connectDB() {
       );
     }
 
+    const startedAt = performance.now();
+    cached.timing.startedAtMs = Math.round(startedAt);
     cached.promise = mongoose
       .connect(uri, {
         // Fail fast with the real reason (auth / IP allowlist / DNS) instead of
@@ -36,8 +47,12 @@ async function connectDB() {
         // Serverless instances are short-lived; don't hold a big pool open.
         maxPoolSize: 5,
       })
-      .then((m) => m)
+      .then((m) => {
+        cached.timing.connectMs = Math.round(performance.now() - startedAt);
+        return m;
+      })
       .catch((err) => {
+        cached.timing.failures += 1;
         // Let the next request retry instead of caching a dead promise forever.
         cached.promise = null;
         throw err;
@@ -48,4 +63,4 @@ async function connectDB() {
   return cached.conn;
 }
 
-module.exports = { connectDB };
+module.exports = { connectDB, dbTiming };
