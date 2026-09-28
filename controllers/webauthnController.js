@@ -1,10 +1,12 @@
-const {
-  generateRegistrationOptions,
-  verifyRegistrationResponse,
-  generateAuthenticationOptions,
-  verifyAuthenticationResponse,
-} = require('@simplewebauthn/server');
-const { isoUint8Array, decodeClientDataJSON } = require('@simplewebauthn/server/helpers');
+// @simplewebauthn/server is loaded on first use: it adds ~0.4 s to every
+// cold start, and only the passkey endpoints need it.
+let webauthnLib = null;
+function webauthn() {
+  if (!webauthnLib) {
+    webauthnLib = { ...require('@simplewebauthn/server'), ...require('@simplewebauthn/server/helpers') };
+  }
+  return webauthnLib;
+}
 
 const User = require('../models/User');
 const WebAuthnCredential = require('../models/WebAuthnCredential');
@@ -34,12 +36,12 @@ async function registrationOptions(req, res) {
     .select('credentialID transports')
     .lean();
 
-  const options = await generateRegistrationOptions({
+  const options = await webauthn().generateRegistrationOptions({
     rpName: RP_NAME,
     rpID: RP_ID,
     userName: user.email,
     userDisplayName: user.username,
-    userID: isoUint8Array.fromUTF8String(user._id.toString()),
+    userID: webauthn().isoUint8Array.fromUTF8String(user._id.toString()),
     attestationType: 'none',
     excludeCredentials: existing.map((c) => ({ id: c.credentialID, transports: c.transports })),
     authenticatorSelection: {
@@ -64,7 +66,7 @@ async function registrationVerify(req, res) {
     return res.status(400).json({ message: 'deviceId and response are required' });
   }
 
-  const clientData = decodeClientDataJSON(response.response.clientDataJSON);
+  const clientData = webauthn().decodeClientDataJSON(response.response.clientDataJSON);
   const challengeDoc = await WebAuthnChallenge.findOneAndDelete({
     challenge: clientData.challenge,
     purpose: 'register',
@@ -75,7 +77,7 @@ async function registrationVerify(req, res) {
 
   let verification;
   try {
-    verification = await verifyRegistrationResponse({
+    verification = await webauthn().verifyRegistrationResponse({
       response,
       expectedChallenge: challengeDoc.challenge,
       expectedOrigin: ORIGIN,
@@ -111,7 +113,7 @@ async function registrationVerify(req, res) {
 // the platform authenticator, not in browser storage.
 
 async function authenticationOptions(req, res) {
-  const options = await generateAuthenticationOptions({
+  const options = await webauthn().generateAuthenticationOptions({
     rpID: RP_ID,
     userVerification: 'preferred',
     // No allowCredentials on purpose: this is the discoverable-credential
@@ -139,7 +141,7 @@ async function authenticationVerify(req, res) {
     return res.status(401).json({ message: 'Passkey not recognized or has been revoked' });
   }
 
-  const clientData = decodeClientDataJSON(response.response.clientDataJSON);
+  const clientData = webauthn().decodeClientDataJSON(response.response.clientDataJSON);
   const challengeDoc = await WebAuthnChallenge.findOneAndDelete({
     challenge: clientData.challenge,
     purpose: 'authenticate',
@@ -150,7 +152,7 @@ async function authenticationVerify(req, res) {
 
   let verification;
   try {
-    verification = await verifyAuthenticationResponse({
+    verification = await webauthn().verifyAuthenticationResponse({
       response,
       expectedChallenge: challengeDoc.challenge,
       expectedOrigin: ORIGIN,
