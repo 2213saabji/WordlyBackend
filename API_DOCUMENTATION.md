@@ -481,7 +481,7 @@ Full contract, flows and error codes: **`docs/COINS_HINTS_CONTRACT.md`**. Summar
 | `GET /store/coin-packs` | `{ "packs": [ { "packId": "coins_3000", "coins": 3000, "pricePaise": 1000, "currency": "INR" } ] }` |
 | `POST /store/orders` `{ "packId" }` | Send `Idempotency-Key`. Returns `201` with the order and a `gateway` block (`provider`, `orderId`, `key`, `amountPaise`, `currency`) for Razorpay Checkout. `503 PAYMENTS_NOT_CONFIGURED` until the store is live. |
 | `GET /store/orders/:orderId` | Order status (`created`, `paid`, `credited`, `failed`, `expired`) and `balance` |
-| `POST /store/orders/:orderId/confirm` `{ "gatewayPaymentId", "signature" }` | `200 { "status": "credited", "coinsCredited": 3000, "balance": 3340 }`. `409 ALREADY_CREDITED` = success (the webhook got there first). `402 PAYMENT_FAILED` = bad signature. |
+| `POST /store/orders/:orderId/confirm` `{ "gatewayPaymentId", "signature" }` (or Checkout's `razorpay_payment_id` / `razorpay_order_id` / `razorpay_signature` unchanged) | `200 { "status": "credited", "coinsCredited": 3000, "balance": 3340 }`. `409 ALREADY_CREDITED` = success (the webhook got there first). `402 PAYMENT_FAILED` = bad signature. |
 | `POST /webhooks/payments` | Razorpay → server, **not under `/api`**, no login, signature-checked |
 
 **Removed:** mobile (WhatsApp/SMS), email-link and bank verification, and the ₹100 Diamond reward. Every `/verification/*` path answers `410 { "code": "GONE" }` for one release. `/rewards/me` still answers in its old shape, without money (see section 6).
