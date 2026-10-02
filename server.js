@@ -217,6 +217,7 @@ app.use((err, req, res, next) => {
 });
 
 // Every module above has loaded: this is how long this instance took to boot.
+// (Deployed on Vercel; see the geo headers note in utils/geo.js.)
 bootMs = Math.round(performance.now());
 
 // Start Server
