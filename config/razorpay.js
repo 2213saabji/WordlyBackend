@@ -10,8 +10,8 @@
 // require in utils/payments.js), and regenerate the test key secret.
 module.exports = {
   PAYMENT_PROVIDER: 'razorpay',
-  RAZORPAY_KEY_ID: 'rzp_test_TjBEXhnt4J8Kkh',
-  RAZORPAY_KEY_SECRET: '5JR0jLmN1r1R1s4twmhQxkMS',
+  RAZORPAY_KEY_ID: 'rzp_test_TjBf41rDE97NEX',
+  RAZORPAY_KEY_SECRET: 'ny1S0Ia0f2mzIxZhrYk4PXHE',
   // Razorpay Dashboard > Webhooks: the secret chosen for
   // https://api.guessword.games/webhooks/payments (the same value goes there).
   RAZORPAY_WEBHOOK_SECRET: '8W5VJWLB0hLOjw9rx9ltW1iRw1xPy23j',
