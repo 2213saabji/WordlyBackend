@@ -13,7 +13,6 @@ const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const DeviceSession = require('../models/DeviceSession');
 const PendingSignup = require('../models/PendingSignup');
-const AuthEvent = require('../models/AuthEvent');
 const TierMembership = require('../models/TierMembership');
 const TierChange = require('../models/TierChange');
 const TierConfig = require('../models/TierConfig');
@@ -29,7 +28,6 @@ const { istDayKey, addDaysKey } = require('../utils/dailyWord');
 
 const USER = '507f1f77bcf86cd799439011';
 const lean = (v) => ({ lean: async () => (v == null ? null : structuredClone(v)) });
-let events;
 let saves;
 
 // A user document exactly as stored before v0.2: no signupLocation.
@@ -40,9 +38,7 @@ const OLD_USER = {
 
 beforeEach(() => {
   stubCoins(); // no Wallet documents: nobody has coins yet
-  events = [];
   saves = 0;
-  AuthEvent.create = async (doc) => { events.push(doc); return doc; };
   DeviceSession.findOneAndUpdate = async () => ({});
   TierConfig.findOne = () => ({ sort: () => lean(null) });
   SyncState.updateOne = async () => ({});
@@ -78,8 +74,7 @@ test('email login for an old account: 200, unchanged except signupLocation: null
   const res = await call(login, { body: { email: 'asha@x.com', password: 'longenough', deviceId: 'd1' }, headers: { 'x-vercel-ip-country': 'IN', 'x-vercel-ip-country-region': 'RJ' } });
   assert.equal(res.status, 200);
   assert.equal(res.body.user.username, 'asha');
-  assert.equal(res.body.user.signupLocation, null);
-  assert.deepEqual(events, [], 'plain email login is not recorded');
+  assert.equal(res.body.user.signupLocation, null, 'login never adds a location');
 });
 
 test('GET /auth/me for an old account (lean, no wallet, no tier): coinBalance 0, signupLocation null', async () => {
@@ -92,7 +87,7 @@ test('GET /auth/me for an old account (lean, no wallet, no tier): coinBalance 0,
   assert.deepEqual(res.body.infinite, { tier: 8, tierName: 'Stone' });
 });
 
-test('Continue with Google for an old Google account: 200, counted, and their signupLocation is not invented', async () => {
+test('Continue with Google for an old Google account: 200, no write, and their signupLocation is not invented', async () => {
   const doc = User.hydrate({ ...structuredClone(OLD_USER), googleId: 'sub-1' });
   doc.save = async () => { saves += 1; };
   User.findOne = async (filter) => (filter.googleId === 'sub-1' ? doc : null);
@@ -102,10 +97,7 @@ test('Continue with Google for an old Google account: 200, counted, and their si
   const res = await call(googleAuth, { body: { idToken: 't', deviceId: 'd1' }, headers: { 'x-vercel-ip-country': 'IN', 'x-vercel-ip-country-region': 'RJ' } });
   assert.equal(res.status, 200);
   assert.equal(res.body.user.signupLocation, null, 'where they signed up is unknown, not today\'s location');
-  assert.equal(saves, 0);
-  assert.equal(events.length, 1);
-  assert.equal(events[0].newAccount, false);
-  assert.equal(events[0].region, 'Rajasthan');
+  assert.equal(saves, 0, 'the old account is not written on login');
 });
 
 test('a signup started before the deploy (pending record without signupLocation) still completes', async () => {
@@ -124,16 +116,24 @@ test('a signup started before the deploy (pending record without signupLocation)
   const res = await call(verifySignupOtp, { body: { email: 'new@x.com', code, deviceId: 'd1' } });
   assert.equal(res.status, 201);
   assert.equal(created.signupLocation, null, 'no headers locally, nothing on the old pending record');
-  assert.equal(events[0].event, 'email_signup');
 });
 
-test('the analytics write failing (e.g. the new collection unavailable) never blocks an old account', async () => {
-  AuthEvent.create = async () => { throw new Error('boom'); };
-  const doc = User.hydrate({ ...structuredClone(OLD_USER), googleId: 'sub-1' });
-  User.findOne = async () => doc;
-  OAuth2Client.prototype.verifyIdToken = async () => ({ getPayload: () => ({ email: 'asha@x.com', email_verified: true, sub: 'sub-1' }) });
-  const res = await call(googleAuth, { body: { idToken: 't', deviceId: 'd1' } });
-  assert.equal(res.status, 200);
+test('a signup started before the deploy takes the confirm request location instead', async () => {
+  const crypto = require('crypto');
+  const code = '111222';
+  const pending = {
+    _id: 'p2', email: 'new2@x.com', username: 'new2', passwordHash: 'h', otpAttempts: 0,
+    expiresAt: new Date(Date.now() + 60000),
+    otpHash: crypto.createHmac('sha256', process.env.JWT_SECRET).update(`signup:new2@x.com:${code}`).digest('hex'),
+  };
+  PendingSignup.findOneAndUpdate = () => lean(pending);
+  PendingSignup.findOneAndDelete = async () => pending;
+  let created;
+  User.create = async (doc) => { created = { _id: 'u3', stats: {}, groups: [], ...doc }; return created; };
+  const headers = { 'x-vercel-ip-country': 'CA', 'x-vercel-ip-country-region': 'ON' };
+  const res = await call(verifySignupOtp, { body: { email: 'new2@x.com', code, deviceId: 'd1' }, headers });
+  assert.equal(res.status, 201);
+  assert.deepEqual(created.signupLocation, { countryCode: 'CA', regionCode: 'ON', region: 'Ontario', regionType: 'Province' });
 });
 
 // --- Infinite tier data stored before v0.2 ---------------------------------------

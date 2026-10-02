@@ -476,7 +476,8 @@ async function settleMembership(initial, config, uptoDay = yesterdayIst()) {
 
       // 1. Inactivity decay: no completed Infinite game that day. A day
       // played but short of the targets isn't decayed — it's only a miss.
-      const idle = !played || !(played.gamesCompleted > 0 || played.gamesWon > 0);
+      // A qualifying day always had games, whatever the counters say.
+      const idle = !qualified && (!played || !(played.gamesCompleted > 0 || played.gamesWon > 0));
       const { effectiveFrom } = config.decay;
       if (idle && (!effectiveFrom || day >= effectiveFrom)) {
         const lost = decayFor(config, score);
