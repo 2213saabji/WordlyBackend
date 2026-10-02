@@ -210,12 +210,15 @@ Send an `Idempotency-Key` header (a UUID per tap). A retry with the same key ret
 - `404 ORDER_NOT_FOUND` (including another player's order).
 
 #### `POST /store/orders/{orderId}/confirm` `{ "gatewayPaymentId": "pay_Q1…", "signature": "…" }`
+Checkout's handler response can also be sent unchanged: `{ "razorpay_payment_id", "razorpay_order_id", "razorpay_signature" }`. If `razorpay_order_id` is sent, it must match the order.
 ```json
 200 { "status": "credited", "orderId": "GW-24816093", "coinsCredited": 3000, "balance": 3340 }
 ```
 | Status | Code | When | App does |
 |---|---|---|---|
 | 409 | `ALREADY_CREDITED` (+ `coinsCredited`, `balance`) | The webhook got there first, or this is a retry | Treat as success |
+| 400 | `INVALID_REQUEST` | `gatewayPaymentId` or `signature` missing | Bug in the app |
+| 400 | `ORDER_MISMATCH` | `razorpay_order_id` sent and it isn't this order's | Bug in the app |
 | 402 | `PAYMENT_FAILED` | Signature doesn't verify | "Payment didn't go through. You weren't charged." |
 | 404 | `ORDER_NOT_FOUND` | | |
 | 503 | `PAYMENTS_NOT_CONFIGURED` | | |
@@ -491,6 +494,7 @@ To ship everything at once, leave the default config (1,000 in tiers 1–6) and 
 
 ## 7. Operations checklist
 
+- **Razorpay settings (temporary):** they're hardcoded in `config/razorpay.js` (test keys), and those values win over the environment variables below. That's safe only with **test** keys, because the repo is public. Before going live, move the live keys to the environment and empty that file.
 - **Env (new):**
   - `PAYMENT_PROVIDER=razorpay`
   - `RAZORPAY_KEY_ID`

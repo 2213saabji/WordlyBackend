@@ -1,4 +1,6 @@
-// Payment gateway for coin purchases. One place to talk to the provider:
+// Payment gateway for coin purchases. One place to talk to the provider.
+// Settings come from config/razorpay.js (TEMPORARY, hardcoded there; it
+// wins over the environment), else from environment variables:
 //
 //   PAYMENT_PROVIDER=razorpay → Razorpay Orders + Checkout. Needs
 //                               RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET and, for
@@ -14,22 +16,30 @@
 //                               configured (the store answers 503).
 
 const crypto = require('crypto');
+const hardcoded = require('../config/razorpay');
+
+// A Razorpay setting: the value in config/razorpay.js wins (TEMPORARY, see
+// that file); one left empty there falls back to the environment.
+function setting(name) {
+  return hardcoded[name] || process.env[name] || '';
+}
 
 const RAZORPAY_API = 'https://api.razorpay.com/v1';
+const RAZORPAY_MIN_AMOUNT_PAISE = 100; // Razorpay rejects orders under ₹1
 const MOCK_SECRET = 'mock_payment_secret';
 
 class PaymentsNotConfiguredError extends Error {}
 class PaymentProviderError extends Error {}
 
 function providerName() {
-  const p = process.env.PAYMENT_PROVIDER;
+  const p = setting('PAYMENT_PROVIDER');
   if (p === 'mock' || p === 'razorpay') return p;
-  return process.env.RAZORPAY_KEY_ID ? 'razorpay' : null;
+  return setting('RAZORPAY_KEY_ID') ? 'razorpay' : null;
 }
 
 function razorpayKeys() {
-  const keyId = process.env.RAZORPAY_KEY_ID;
-  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  const keyId = setting('RAZORPAY_KEY_ID');
+  const keySecret = setting('RAZORPAY_KEY_SECRET');
   if (!keyId || !keySecret) throw new PaymentsNotConfiguredError('RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET must be set');
   return { keyId, keySecret };
 }
@@ -48,6 +58,11 @@ function safeEqual(a, b) {
 async function createGatewayOrder({ amountPaise, currency, receipt, notes }) {
   const provider = providerName();
   if (!provider) throw new PaymentsNotConfiguredError('No payment provider is configured');
+  // Pack prices are config, so a typo there (e.g. rupees instead of paise)
+  // is caught here, before Razorpay refuses it.
+  if (!Number.isInteger(amountPaise) || amountPaise < RAZORPAY_MIN_AMOUNT_PAISE) {
+    throw new PaymentProviderError(`Order amount must be a whole number of paise, at least ${RAZORPAY_MIN_AMOUNT_PAISE}; got ${amountPaise}`);
+  }
 
   if (provider === 'mock') {
     return { provider, gatewayOrderId: `mock_order_${crypto.randomBytes(8).toString('hex')}`, keyId: 'mock_key' };
@@ -68,6 +83,11 @@ async function createGatewayOrder({ amountPaise, currency, receipt, notes }) {
     throw new PaymentProviderError(`Razorpay order request failed: ${err.message}`);
   }
   const body = await response.json().catch(() => ({}));
+  if (response.status === 401) {
+    // Not the player's session: the server's Razorpay keys are wrong, or
+    // test and live keys are mixed up. Never passed on to the app as a 401.
+    throw new PaymentProviderError('Razorpay rejected the API keys (401): check RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET');
+  }
   if (!response.ok || !body.id) {
     const reason = body.error && body.error.description ? body.error.description : `HTTP ${response.status}`;
     throw new PaymentProviderError(`Razorpay order create failed: ${reason}`);
@@ -87,7 +107,7 @@ function verifyPaymentSignature({ provider, gatewayOrderId, gatewayPaymentId, si
 // with the webhook secret. In mock mode, MOCK_SECRET.
 function verifyWebhookSignature(rawBody, signature) {
   const provider = providerName();
-  const secret = provider === 'mock' ? MOCK_SECRET : process.env.RAZORPAY_WEBHOOK_SECRET;
+  const secret = provider === 'mock' ? MOCK_SECRET : setting('RAZORPAY_WEBHOOK_SECRET');
   if (!secret) throw new PaymentsNotConfiguredError('RAZORPAY_WEBHOOK_SECRET is not set');
   return safeEqual(hmacHex(secret, rawBody), signature);
 }
@@ -118,6 +138,7 @@ function mockSign(data) {
 }
 
 module.exports = {
+  setting,
   PaymentsNotConfiguredError,
   PaymentProviderError,
   providerName,

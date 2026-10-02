@@ -1,7 +1,9 @@
 // Coin store (PRD v0.2 §2.2, §7): orders, the client confirm and the
 // gateway webhook sharing one idempotent credit. PAYMENT_PROVIDER=mock and
 // in-memory model stubs, so no database or network is needed.
-process.env.PAYMENT_PROVIDER = 'mock';
+// config/razorpay.js wins over the environment, so the mock gateway is
+// selected there: these tests must never reach the real Razorpay API.
+require('../config/razorpay').PAYMENT_PROVIDER = 'mock';
 
 const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -196,4 +198,43 @@ test('an unpaid order past its expiry reads as expired', async () => {
   coins.orders[0].expiresAt = new Date(Date.now() - 1000);
   const { body } = await call(getOrder, { params: { orderId: order.orderId } });
   assert.equal(body.status, 'expired');
+});
+
+test('confirm with missing fields: 400 INVALID_REQUEST, nothing credited', async () => {
+  const order = await newOrder();
+  const res = await call(confirmOrder, { params: { orderId: order.orderId }, body: { gatewayPaymentId: 'pay_Q1' } });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.code, 'INVALID_REQUEST');
+  assert.equal(coins.balance(USER), 0);
+});
+
+test("confirm accepts Checkout's handler response as is (razorpay_* fields)", async () => {
+  const order = await newOrder();
+  const res = await call(confirmOrder, {
+    params: { orderId: order.orderId },
+    body: {
+      razorpay_order_id: order.gateway.orderId,
+      razorpay_payment_id: 'pay_R1',
+      razorpay_signature: paymentSignature(order.gateway.orderId, 'pay_R1'),
+    },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(coins.balance(USER), 3000);
+});
+
+test('confirm with a razorpay_order_id for another order: 400 ORDER_MISMATCH', async () => {
+  const order = await newOrder();
+  const res = await call(confirmOrder, {
+    params: { orderId: order.orderId },
+    body: { razorpay_order_id: 'order_someone_else', razorpay_payment_id: 'pay_R1', razorpay_signature: paymentSignature('order_someone_else', 'pay_R1') },
+  });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.code, 'ORDER_MISMATCH');
+  assert.equal(coins.balance(USER), 0);
+});
+
+test('a pack priced under Razorpay\'s ₹1 minimum is refused before calling the gateway', async () => {
+  const { createGatewayOrder, PaymentProviderError } = require('../utils/payments');
+  await assert.rejects(createGatewayOrder({ amountPaise: 50, currency: 'INR', receipt: 'GW-1' }), PaymentProviderError);
+  await assert.rejects(createGatewayOrder({ amountPaise: 10.5, currency: 'INR', receipt: 'GW-1' }), PaymentProviderError);
 });

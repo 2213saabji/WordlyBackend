@@ -8,6 +8,7 @@ const {
   PaymentProviderError,
   createGatewayOrder,
   verifyPaymentSignature,
+  setting,
 } = require('../utils/payments');
 
 const MAX_IDEMPOTENCY_KEY_LENGTH = 100;
@@ -34,7 +35,7 @@ function orderResponse(order) {
     gateway: {
       provider: order.provider,
       orderId: order.gatewayOrderId,
-      key: order.provider === 'razorpay' ? process.env.RAZORPAY_KEY_ID : 'mock_key',
+      key: order.provider === 'razorpay' ? setting('RAZORPAY_KEY_ID') : 'mock_key',
       amountPaise: order.amountPaise,
       currency: order.currency,
     },
@@ -137,7 +138,18 @@ async function confirmOrder(req, res) {
     });
   }
 
-  const { gatewayPaymentId, signature } = req.body || {};
+  // Accepts Checkout's handler response as is (razorpay_payment_id,
+  // razorpay_order_id, razorpay_signature) as well as the short names.
+  const body = req.body || {};
+  const gatewayPaymentId = body.gatewayPaymentId || body.razorpay_payment_id;
+  const signature = body.signature || body.razorpay_signature;
+  const gatewayOrderId = body.razorpay_order_id;
+  if (typeof gatewayPaymentId !== 'string' || !gatewayPaymentId || typeof signature !== 'string' || !signature) {
+    return res.status(400).json({ message: 'gatewayPaymentId and signature are required', code: 'INVALID_REQUEST' });
+  }
+  if (gatewayOrderId !== undefined && gatewayOrderId !== order.gatewayOrderId) {
+    return res.status(400).json({ message: 'This payment is for a different order', code: 'ORDER_MISMATCH' });
+  }
   let valid;
   try {
     valid = verifyPaymentSignature({ provider: order.provider, gatewayOrderId: order.gatewayOrderId, gatewayPaymentId, signature });
