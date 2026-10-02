@@ -101,8 +101,8 @@ async function weeklyContactDigest(req, res) {
   });
 }
 
-// Settles yesterday (IST) for the Infinite tier board: day counters, the
-// miss window, promotion, demotion and the Tier 1 reward cycle. One
+// Settles yesterday (IST) for the Infinite tier board: inactivity decay,
+// day counters, the miss window, promotion, demotion and Diamond stars. One
 // call handles up to `batchSize` members; the caller repeats until
 // `done: true` (see .github/workflows/infinite-daily-reset.yml). Safe to run
 // late or twice — settleMembership() only applies days after each member's
@@ -118,20 +118,22 @@ async function infiniteDailyReset(req, res) {
   const batchSize = Number.isFinite(requested) && requested > 0 ? Math.min(requested, RESET_MAX_BATCH) : RESET_DEFAULT_BATCH;
   const deadline = Date.now() + RESET_TIME_BUDGET_MS;
 
-  // Tiers 1-7 always (a no-show is a missed day), but Tier 8 only when the
-  // member has played since their last settle — dormant Tier 8 accounts
-  // can't be demoted and have nothing to settle.
+  // Tiers 1-7 always (a no-show is a missed day). Tier 8 can't be
+  // demoted, so only when the member has played since their last settle or
+  // still has points for inactivity decay to take — dormant Tier 8 accounts
+  // at 0 points have nothing to settle.
   const members = await TierMembership.find({
     lastSettledDay: { $lt: day },
     $or: [
       { tier: { $lte: 7 } },
+      { tier: 8, score: { $gt: 0 } },
       { tier: 8, $expr: { $gt: ['$lastActiveDay', '$lastSettledDay'] } },
     ],
   })
     .limit(batchSize)
     .lean();
 
-  const totals = { processed: 0, promoted: 0, demoted: 0, payoutsCreated: 0, failed: 0 };
+  const totals = { processed: 0, promoted: 0, demoted: 0, decayed: 0, pointsDecayed: 0, starsEarned: 0, failed: 0 };
   for (let i = 0; i < members.length && Date.now() < deadline; i += RESET_CONCURRENCY) {
     const chunk = members.slice(i, i + RESET_CONCURRENCY);
     const results = await Promise.allSettled(chunk.map((m) => settleMembership(m, config, day)));
@@ -142,9 +144,9 @@ async function infiniteDailyReset(req, res) {
         console.error('Infinite reset: settle failed', r.reason);
         continue;
       }
-      totals.promoted += r.value.stats.promoted;
-      totals.demoted += r.value.stats.demoted;
-      totals.payoutsCreated += r.value.stats.payoutsCreated;
+      for (const key of ['promoted', 'demoted', 'decayed', 'pointsDecayed', 'starsEarned']) {
+        totals[key] += r.value.stats[key];
+      }
     }
   }
 
@@ -154,4 +156,4 @@ async function infiniteDailyReset(req, res) {
   return res.json({ day, ...totals, done });
 }
 
-module.exports = { dailyContactDigest, weeklyContactDigest, infiniteDailyReset };
+module.exports = { requireCronSecret, dailyContactDigest, weeklyContactDigest, infiniteDailyReset };

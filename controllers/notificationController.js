@@ -1,17 +1,21 @@
 const mongoose = require('mongoose');
 const Notification = require('../models/Notification');
+
+const { NOTIFICATION_TYPES } = Notification;
 const { parsePagination } = require('../utils/leaderboard');
 const { bumpSync } = require('../utils/sync');
 
 // GET /notifications?unread=true&page=1
 async function list(req, res) {
   const { page, limit } = parsePagination(req.query);
-  const filter = { user: req.userId };
+  // Only current types: notifications of removed features (payouts,
+  // verification) stay in the database but are never listed.
+  const filter = { user: req.userId, type: { $in: NOTIFICATION_TYPES } };
   if (req.query.unread === 'true') filter.readAt = null;
 
   const [total, unreadCount, items] = await Promise.all([
     Notification.countDocuments(filter),
-    Notification.countDocuments({ user: req.userId, readAt: null }),
+    Notification.countDocuments({ user: req.userId, type: { $in: NOTIFICATION_TYPES }, readAt: null }),
     Notification.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
   ]);
 

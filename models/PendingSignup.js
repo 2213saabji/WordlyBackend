@@ -17,6 +17,15 @@ const pendingSignupSchema = new mongoose.Schema(
     expiresAt: { type: Date, required: true }, // when the link and code stop working
     otpAttempts: { type: Number, default: 0 },
     lastSentAt: { type: Date, required: true, expires: 24 * 60 * 60 },
+    // Location of the signup form request, copied to the User on creation
+    // (the emailed link may be opened somewhere else).
+    signupLocation: {
+      type: new mongoose.Schema(
+        { countryCode: String, regionCode: String, region: String, regionType: String },
+        { _id: false }
+      ),
+      default: null,
+    },
   },
   { timestamps: true }
 );

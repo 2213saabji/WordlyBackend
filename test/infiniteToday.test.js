@@ -11,6 +11,7 @@ const TierConfig = require('../models/TierConfig');
 const SyncState = require('../models/SyncState');
 const SyncGlobal = require('../models/SyncGlobal');
 const { submitInfiniteGuess, getCurrentInfinite, newInfiniteGame } = require('../controllers/gameController');
+const { stubCoins } = require('./helpers/coinStubs');
 
 const USER = '507f1f77bcf86cd799439011';
 const T0 = new Date('2026-09-28T06:00:00.000Z').getTime(); // 11:30 IST
@@ -76,6 +77,7 @@ beforeEach(() => {
 
   SyncState.updateOne = async () => ({});
   SyncGlobal.updateOne = async () => ({});
+  stubCoins();
 });
 
 function call(handler, body = {}) {

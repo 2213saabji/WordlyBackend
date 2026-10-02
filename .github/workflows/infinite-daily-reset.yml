@@ -1,7 +1,7 @@
 name: Infinite tier daily reset
 
-# Settles the previous IST day for the Infinite tier leaderboard (day
-# counters, promotion, demotion, Tier 1 reward cycle). See
+# Settles the previous IST day for the Infinite tier leaderboard
+# (inactivity decay, day counters, promotion, demotion, Diamond stars). See
 # infiniteDailyReset in controllers/cronController.js.
 #
 # GitHub may start scheduled runs late; that's fine — the endpoint is

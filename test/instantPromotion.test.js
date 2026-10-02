@@ -8,13 +8,13 @@ const TierMembership = require('../models/TierMembership');
 const InfiniteDay = require('../models/InfiniteDay');
 const TierChange = require('../models/TierChange');
 const Notification = require('../models/Notification');
-const Payout = require('../models/Payout');
 const Game = require('../models/Game');
 const SyncState = require('../models/SyncState');
 const SyncGlobal = require('../models/SyncGlobal');
 const { DEFAULT_TIER_CONFIG: config, tierDef } = require('../utils/tierConfig');
 const { evaluateQualification, scoreFinishedGame } = require('../utils/tiers');
 const { istDayKey, addDaysKey } = require('../utils/dailyWord');
+const { stubCoins } = require('./helpers/coinStubs');
 
 const USER = '507f1f77bcf86cd799439011';
 const TODAY = istDayKey();
@@ -56,7 +56,7 @@ beforeEach(() => {
   };
   TierChange.create = async (doc) => { changes.push(doc); return doc; };
   Notification.create = async (doc) => { notes.push(doc.type); return doc; };
-  Payout.updateOne = async () => ({ upsertedCount: 0 });
+  stubCoins();
   SyncState.updateOne = async () => ({});
   SyncGlobal.updateOne = async () => ({});
 });
@@ -87,14 +87,13 @@ test('the word that completes Platinum 29 → 30 promotes to Diamond immediately
   assert.ok(changes[0].window.some((w) => w.day === TODAY && w.qualified), 'today is in the old tier window');
 });
 
-test('reaching Diamond always sends verification_needed (rewards off by default)', async () => {
-  assert.equal(config.rewardsEnabled, false);
+test('reaching Diamond sends only the promotion notification (no verification any more)', async () => {
   setup(2, 29);
   await evaluateQualification(day, config);
-  assert.deepEqual(notes.sort(), ['promotion', 'verification_needed']);
+  assert.deepEqual(notes, ['promotion']);
 });
 
-test('other tiers promote instantly too, without a verification prompt', async () => {
+test('other tiers promote instantly too', async () => {
   setup(5, tierDef(config, 5).daysToStick - 1);
   await evaluateQualification(day, config);
   assert.equal(member.tier, 4);
@@ -129,7 +128,7 @@ test('no instant promotion if the player already moved off the day\'s tier', asy
   assert.equal(member.tier, 2);
 });
 
-test('Diamond itself is not affected (its reward cycle still runs nightly)', async () => {
+test('Diamond itself is not affected (its star cycle still runs nightly)', async () => {
   setup(1, tierDef(config, 1).daysToStick - 1);
   await evaluateQualification(day, config);
   assert.equal(member.tier, 1);

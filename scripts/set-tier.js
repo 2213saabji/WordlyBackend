@@ -13,7 +13,7 @@
  * - logs a TierChange — reason "admin", or "promotion"/"demotion" with
  *   --announce so the app shows its "Moved up overnight" screen;
  * - bumps the /sync versions so every open app refetches the tier data.
- * It does not create payouts or send notifications.
+ * It does not send notifications.
  */
 require('dotenv').config();
 const mongoose = require('mongoose');
@@ -88,7 +88,7 @@ async function main() {
   });
 
   // After the writes, so a sync that sees the bump finds the new data.
-  await bumpSync(user._id, ['me', 'infinite', 'tierChanges', 'rewards']);
+  await bumpSync(user._id, ['me', 'infinite', 'tierChanges']);
   await bumpGlobal(['infiniteBoard']);
 
   console.log(`${user.username}: tier ${m.tier} -> ${toTier} (${reason}). Score ${m.score} -> ${carriedScore}.`);

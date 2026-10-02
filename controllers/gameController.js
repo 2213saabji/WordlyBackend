@@ -9,12 +9,23 @@ const { hintForWord } = require('../utils/wordHints');
 const { getTierConfig, tierDef } = require('../utils/tierConfig');
 const { loadSettledMembership, creditActivity, scoreFinishedGame, todayProgress } = require('../utils/tiers');
 const { bumpSync, bumpGlobal } = require('../utils/sync');
+const {
+  InsufficientCoinsError,
+  DuplicateEntryError,
+  runInTransaction,
+  applyCoins,
+  walletChanged,
+  getBalance,
+  awardSolveCoins,
+} = require('../utils/wallet');
 
 const MAX_ATTEMPTS = 6;
 const WORD_LENGTH = 5;
 
 // `infinite` options apply to infinite games only:
-//   hintsEnabled   - the caller's current tier allows hints
+//   hintCost       - coins the caller's current tier charges for the hint
+//                    (0 = free: the hint is in the payload from the start;
+//                    null = hints off in this tier)
 //   hideDifficulty - withhold difficulty until the game ends (stops players
 //                    skipping every hard word before guessing)
 function serializeGame(game, infinite = {}) {
@@ -38,18 +49,22 @@ function serializeGame(game, infinite = {}) {
   };
   if (game.mode !== 'infinite') return base;
 
-  // Infinite: mid-game, the hint is in the payload only when the player's
-  // tier allows hints (Tiers 7-8) or they already revealed it. Tiers 1-6
-  // never receive it until the game is over. POST /game/infinite/hint
-  // enforces the same rule for clients that fetch it on demand.
+  // Infinite: mid-game, the hint is in the payload only when it's free in
+  // the player's tier (Tiers 7-8) or they already revealed (bought) it.
+  // In Tiers 1-6 it costs coins, through POST /game/infinite/hint.
   const inProgress = game.status === 'in-progress';
-  const showHint = !inProgress || infinite.hintsEnabled || Boolean(game.hintRevealedAt);
+  const { hintCost } = infinite;
+  const showHint = !inProgress || hintCost === 0 || Boolean(game.hintRevealedAt);
   return {
     ...base,
     hint: showHint ? base.hint : undefined,
     difficulty: inProgress && infinite.hideDifficulty ? undefined : difficulty,
-    hintsEnabled: infinite.hintsEnabled,
+    hintCost,
+    // Deprecated: true when the hint is free. Kept so older apps keep
+    // hiding the hint in paid tiers instead of calling the hint endpoint.
+    hintsEnabled: hintCost === 0,
     hintRevealed: Boolean(game.hintRevealedAt),
+    hintCoinsSpent: game.hintCoinsSpent || 0,
     pointsAwarded: game.pointsAwarded ?? null,
     countedDay: game.countedDay ?? null,
     tierAtCompletion: game.tierAtCompletion ?? null,
@@ -131,8 +146,11 @@ async function submitGuess(req, res) {
 
   await game.save();
 
+  const response = { result, game: serializeGame(game) };
   if (game.status !== 'in-progress') {
     await applyStatsForFinishedGame(req.userId, game);
+    // +10 coins for a solve; { awarded: 0 } for a loss.
+    response.coins = await awardSolveCoins(game, await getTierConfig());
   }
   // Every guess changes /game/today; a finished game also changes the
   // stats in /auth/me and puts the player on the daily and weekly boards.
@@ -142,7 +160,7 @@ async function submitGuess(req, res) {
     await bumpSync(req.userId, 'today');
   }
 
-  return res.json({ result, game: serializeGame(game) });
+  return res.json(response);
 }
 
 async function applyStatsForFinishedGame(userId, game) {
@@ -188,7 +206,7 @@ async function infiniteContext(userId) {
     config,
     membership,
     tier,
-    view: { hintsEnabled: tierDef(config, tier).hintsEnabled, hideDifficulty: config.hideDifficultyInProgress },
+    view: { hintCost: tierDef(config, tier).hintCost, hideDifficulty: config.hideDifficultyInProgress },
   };
 }
 
@@ -260,25 +278,111 @@ async function newInfiniteGame(req, res) {
   });
 }
 
-// Reveals the hint for the current game. The tier rule is checked here, on
-// the server, against the player's tier at request time — so a player
-// promoted overnight into Tier 6 can't reveal a hint on a game they started
-// in Tier 7. Revealing again returns the same hint.
+// The body of a successful hint response.
+async function hintResponse(game, userId, coinsSpent, balance) {
+  return {
+    hint: hintForWord(game.word),
+    coinsSpent,
+    balance: balance ?? (await getBalance(userId)),
+    hintsUsed: 1,
+    hintsLeft: 0,
+  };
+}
+
+// POST /game/infinite/hint  { gameId?, expectedCost }
+// Reveals the current round's hint (the word's clue). One hint per round;
+// asking again returns the same hint at no charge. The cost is the
+// caller's tier at request time (so a player promoted overnight into
+// Tier 6 pays for a round started in Tier 7):
+//   off (hintCost null, for a staged rollout) → 403 HINTS_DISABLED_FOR_TIER;
+//   free (Tiers 7–8)  → revealed straight away;
+//   paid (Tiers 1–6)  → the app must send expectedCost equal to the cost it
+//                       showed on the confirm sheet (none at all = an app
+//                       from before paid hints: 403, as before). The coins are debited
+//                       and the hint revealed in one transaction: if either
+//                       fails, neither happens. expectedCost is only a
+//                       guard — the amount charged is always the server's.
 async function revealInfiniteHint(req, res) {
   const ctx = await infiniteContext(req.userId);
-  if (!ctx.view.hintsEnabled) {
-    return res.status(403).json({ message: 'Hints are disabled in your tier', code: 'HINTS_DISABLED_FOR_TIER' });
-  }
+  const { gameId, expectedCost } = req.body || {};
 
   const game = await Game.findOne({ user: req.userId, mode: 'infinite', status: 'in-progress' });
-  if (!game) {
-    return res.status(400).json({ message: 'No infinite game in progress. Start one with POST /api/game/infinite/new' });
+  if (!game || (gameId != null && String(game._id) !== String(gameId))) {
+    return res.status(400).json({ message: 'No infinite game in progress. Start one with POST /api/game/infinite/new', code: 'NO_GAME_IN_PROGRESS' });
   }
-  if (!game.hintRevealedAt) {
-    game.hintRevealedAt = new Date();
-    await game.save();
+  if (game.hintRevealedAt) {
+    return res.json(await hintResponse(game, req.userId, 0));
   }
-  return res.json({ hint: hintForWord(game.word) });
+  const cost = ctx.view.hintCost;
+  if (cost === null) {
+    return res.status(403).json({ message: 'Hints are off in your tier', code: 'HINTS_DISABLED_FOR_TIER' });
+  }
+  if (!hintForWord(game.word)) {
+    return res.status(409).json({ message: 'This word has no hint', code: 'NOTHING_TO_REVEAL' });
+  }
+
+  if (cost === 0) {
+    await Game.updateOne({ _id: game._id, hintRevealedAt: null }, { $set: { hintRevealedAt: new Date(), hintCoinsSpent: 0 } });
+    return res.json(await hintResponse(game, req.userId, 0));
+  }
+
+  const balance = await getBalance(req.userId);
+  if (expectedCost === undefined || expectedCost === null) {
+    // An app from before paid hints (it never shows a price): answer the
+    // way it already handles — hints off — and charge nothing.
+    return res.status(403).json({
+      message: 'Hints cost coins in your tier. Update the app to buy one.',
+      code: 'HINTS_DISABLED_FOR_TIER',
+      hintCost: cost,
+      balance,
+    });
+  }
+  if (expectedCost !== cost) {
+    // The app showed a different price (config or tier changed since the
+    // confirm sheet opened). Nothing is charged.
+    return res.status(409).json({
+      message: `A hint costs ${cost} coins. Confirm to buy it.`,
+      code: 'HINT_COST_CHANGED',
+      hintCost: cost,
+      balance,
+    });
+  }
+  if (balance < cost) {
+    return res.status(402).json({ message: 'Not enough coins', code: 'INSUFFICIENT_COINS', balance, required: cost });
+  }
+
+  try {
+    const entry = await runInTransaction(async (session) => {
+      const debit = await applyCoins({
+        userId: req.userId,
+        type: 'hint_spend',
+        amount: -cost,
+        idempotencyKey: `hint:${game._id}`,
+        ref: { gameId: String(game._id), tier: ctx.tier },
+        session,
+      });
+      const revealed = await Game.updateOne(
+        { _id: game._id, status: 'in-progress', hintRevealedAt: null },
+        { $set: { hintRevealedAt: new Date(), hintCoinsSpent: cost } },
+        { session }
+      );
+      // The round ended or another request revealed it first: abort, so
+      // the debit rolls back.
+      if (!revealed.modifiedCount) throw new DuplicateEntryError();
+      return debit;
+    });
+    await walletChanged(req.userId);
+    return res.json(await hintResponse(game, req.userId, cost, entry.balanceAfter));
+  } catch (err) {
+    if (err instanceof InsufficientCoinsError) {
+      return res.status(402).json({ message: 'Not enough coins', code: 'INSUFFICIENT_COINS', balance: err.balance, required: cost });
+    }
+    if (!(err instanceof DuplicateEntryError)) throw err;
+    // Nothing was charged by this request. Report what's true now.
+    const current = await Game.findById(game._id);
+    if (current && current.hintRevealedAt) return res.json(await hintResponse(current, req.userId, 0));
+    return res.status(400).json({ message: 'This round is already over', code: 'NO_GAME_IN_PROGRESS' });
+  }
 }
 
 async function submitInfiniteGuess(req, res) {
@@ -332,6 +436,9 @@ async function submitInfiniteGuess(req, res) {
   if (game.status !== 'in-progress') {
     const tier = await scoreFinishedGame(game, { config: ctx.config, maxAttempts: MAX_ATTEMPTS });
     if (tier) response.tier = tier;
+    // +10 coins for a solve, once per game (a concurrent request that
+    // scored it gets awarded: 0).
+    response.coins = await awardSolveCoins(game, ctx.config);
   }
   response.game = serializeGame(game, ctx.view);
   // Every guess returns today's card, so "Active time" updates live. When

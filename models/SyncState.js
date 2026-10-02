@@ -15,7 +15,7 @@ const syncStateSchema = new mongoose.Schema(
       infinite: { type: Number, default: 0 }, // GET /infinite/me
       tierChanges: { type: Number, default: 0 }, // GET /infinite/tier-changes
       notifications: { type: Number, default: 0 }, // GET /notifications
-      rewards: { type: Number, default: 0 }, // GET /rewards/me
+      wallet: { type: Number, default: 0 }, // GET /wallet, GET /wallet/transactions
     },
   },
   { timestamps: true }

@@ -30,6 +30,7 @@ const gameSchema = new mongoose.Schema(
     tierAtStart: { type: Number, default: null },
     tierAtCompletion: { type: Number, default: null },
     hintRevealedAt: { type: Date, default: null }, // set by POST /game/infinite/hint
+    hintCoinsSpent: { type: Number, default: 0 }, // what the reveal cost (0 in free-hint tiers)
     pointsAwarded: { type: Number, default: null },
     scoredAt: { type: Date, default: null }, // guard: a game is scored at most once
     clientIp: { type: String, default: null },

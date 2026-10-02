@@ -20,8 +20,12 @@ const contactRoutes = require('./routes/contactRoutes');
 const cronRoutes = require('./routes/cronRoutes');
 const infiniteRoutes = require('./routes/infiniteRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
-const rewardRoutes = require('./routes/rewardRoutes');
-const verificationRoutes = require('./routes/verificationRoutes');
+const walletRoutes = require('./routes/walletRoutes');
+const storeRoutes = require('./routes/storeRoutes');
+const analyticsRoutes = require('./routes/analyticsRoutes');
+const { gone } = require('./routes/goneRoutes');
+const { requireAuth } = require('./middleware/auth');
+const { legacyRewardsMe } = require('./controllers/infiniteController');
 const syncRoutes = require('./routes/syncRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
 
@@ -49,7 +53,7 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
   // Readable by the frontend's JS, for cold-start measurements.
   exposedHeaders: ['Server-Timing', 'X-Cold-Start'],
 };
@@ -191,8 +195,14 @@ app.use('/api/contact', contactRoutes);
 app.use('/api/cron', cronRoutes);
 app.use('/api/infinite', infiniteRoutes);
 app.use('/api/notifications', notificationRoutes);
-app.use('/api/rewards', rewardRoutes);
-app.use('/api/verification', verificationRoutes);
+app.use('/api/wallet', walletRoutes);
+app.use('/api/store', storeRoutes);
+app.use('/api/analytics', analyticsRoutes);
+// Removed in v0.2. GET /rewards/me still answers (no money, stars only)
+// for apps that read it without asking; the rest is 410 Gone. Both go next
+// release.
+app.get('/api/rewards/me', requireAuth, legacyRewardsMe);
+app.use(['/api/rewards', '/api/verification'], gone);
 app.use('/api/sync', syncRoutes);
 
 // 404 handler

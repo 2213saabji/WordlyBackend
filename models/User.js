@@ -34,6 +34,18 @@ const userSchema = new mongoose.Schema(
     },
 
     groups: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Group' }],
+
+    // Where the account was created, from the signup request's IP (see
+    // utils/geo.js): { countryCode: 'IN', regionCode: 'RJ', region:
+    // 'Rajasthan', regionType: 'State' }. null when the edge gave no
+    // location, and for accounts created before this was recorded.
+    signupLocation: {
+      type: new mongoose.Schema(
+        { countryCode: String, regionCode: String, region: String, regionType: String },
+        { _id: false }
+      ),
+      default: null,
+    },
   },
   { timestamps: true }
 );

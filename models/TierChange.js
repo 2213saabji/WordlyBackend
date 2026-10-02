@@ -12,7 +12,12 @@ const tierChangeSchema = new mongoose.Schema(
     oldScore: { type: Number, default: 0 },
     oldRank: { type: Number, default: null },
     oldTierSize: { type: Number, default: null },
-    carriedScore: { type: Number, default: 0 },
+    carriedScore: { type: Number, default: 0 }, // points entered the new tier with (= entryPoints)
+    // The carry-in breakdown: carryInPercent of the old score, then the
+    // demotion penalty (0 on promotion, never more than carriedPoints).
+    carriedPoints: { type: Number, default: null },
+    penalty: { type: Number, default: 0 }, // <= 0
+    entryPoints: { type: Number, default: null },
     rankAtEntry: { type: Number, default: null },
     newTierSize: { type: Number, default: null },
     // Snapshot of the old tier's last <=7 settled days when the move happened.
