@@ -1,13 +1,15 @@
 const mongoose = require('mongoose');
 
+// Older documents may still carry removed types (reward_earned,
+// payout_sent, payout_failed, verification_needed); GET /notifications only
+// lists the types below.
 const NOTIFICATION_TYPES = [
   'promotion',
   'demotion_risk',
   'demotion',
-  'reward_earned',
-  'payout_sent',
-  'payout_failed',
-  'verification_needed',
+  'coins_purchased',
+  'payment_failed',
+  'points_decayed',
 ];
 
 const notificationSchema = new mongoose.Schema(

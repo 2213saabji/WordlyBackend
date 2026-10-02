@@ -122,7 +122,7 @@ function seedFromString(str) {
 
 // userId is public (it's in leaderboard responses), so a seed derived from it
 // alone lets anyone with this file predict a player's next infinite word -
-// which matters once Tier 1 pays out. With INFINITE_SEED_SECRET set, the seed
+// which matters now that solves earn coins. With INFINITE_SEED_SECRET set, the seed
 // is an HMAC of the userId instead. Setting it reshuffles every existing
 // user's order once; without it, the legacy seed is kept.
 function infiniteSeed(key) {

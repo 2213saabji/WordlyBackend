@@ -9,7 +9,9 @@ const TierMembership = require('../models/TierMembership');
 const PendingSignup = require('../models/PendingSignup');
 const { sendPasswordResetEmail, sendSignupVerificationEmail } = require('../utils/email');
 const { getTierConfig, tierDef } = require('../utils/tierConfig');
-const { safeEqualHex } = require('../utils/verificationCrypto');
+const { getBalance } = require('../utils/wallet');
+const { locationFromRequest } = require('../utils/geo');
+const { storedLocation, recordAuthEvent } = require('../utils/authAnalytics');
 const { bumpSync, bumpGlobal } = require('../utils/sync');
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -54,6 +56,8 @@ function publicUser(user) {
     email: user.email,
     stats: user.stats,
     groups: user.groups,
+    // { countryCode, regionCode, region, regionType } or null.
+    signupLocation: user.signupLocation || null,
   };
 }
 
@@ -61,6 +65,11 @@ function publicUser(user) {
 
 function signupOtpHash(email, code) {
   return crypto.createHmac('sha256', process.env.JWT_SECRET).update(`signup:${email}:${code}`).digest('hex');
+}
+
+function safeEqualHex(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
 }
 
 function sha256(value) {
@@ -114,15 +123,25 @@ function signupSentResponse(email) {
 // Turns a confirmed pending signup into a real account and logs this
 // device in. Deleting the pending record first is what makes the link and
 // code single-use: of two concurrent confirms, only one gets the record.
-async function completeSignup(pendingId, deviceId, res) {
+async function completeSignup(pendingId, deviceId, req, res) {
   const pending = await PendingSignup.findOneAndDelete({ _id: pendingId });
   if (!pending) {
     return res.status(400).json({ message: 'This signup was already completed or has expired', code: 'SIGNUP_INVALID' });
   }
 
+  // Where the signup form was sent from; failing that, this confirm request.
+  const signupLocation = (pending.signupLocation && pending.signupLocation.countryCode)
+    ? storedLocation(pending.signupLocation)
+    : storedLocation(locationFromRequest(req));
+
   let user;
   try {
-    user = await User.create({ username: pending.username, email: pending.email, passwordHash: pending.passwordHash });
+    user = await User.create({
+      username: pending.username,
+      email: pending.email,
+      passwordHash: pending.passwordHash,
+      signupLocation,
+    });
   } catch (err) {
     // The email got an account in the meantime (e.g. Google sign-in).
     if (err && err.code === 11000) {
@@ -130,6 +149,8 @@ async function completeSignup(pendingId, deviceId, res) {
     }
     throw err;
   }
+
+  await recordAuthEvent({ event: 'email_signup', userId: user._id, newAccount: true, location: signupLocation });
 
   const token = signToken(user._id);
   await issueDeviceSession(user._id, deviceId);
@@ -172,7 +193,7 @@ async function signup(req, res) {
 
   const passwordHash = await bcrypt.hash(password, 10);
   try {
-    await sendSignupCodes(normalizedEmail, { username, passwordHash });
+    await sendSignupCodes(normalizedEmail, { username, passwordHash, signupLocation: storedLocation(locationFromRequest(req)) });
   } catch (err) {
     console.error('Failed to send signup verification email:', err);
     return res.status(502).json({ message: 'Could not send the verification email. Try again.', code: 'EMAIL_SEND_FAILED' });
@@ -239,7 +260,7 @@ async function verifySignupOtp(req, res) {
   }
   if (!safeEqualHex(pending.otpHash, signupOtpHash(email, code))) return invalid();
 
-  return completeSignup(pending._id, deviceId, res);
+  return completeSignup(pending._id, deviceId, req, res);
 }
 
 // POST /auth/signup/verify/:token  { deviceId }
@@ -258,7 +279,7 @@ async function verifySignupLink(req, res) {
     return res.status(400).json({ message: 'This verification link is invalid or has expired', code: 'SIGNUP_LINK_INVALID' });
   }
 
-  return completeSignup(pending._id, deviceId, res);
+  return completeSignup(pending._id, deviceId, req, res);
 }
 
 async function login(req, res) {
@@ -325,6 +346,8 @@ async function googleAuth(req, res) {
   const googleId = payload.sub;
 
   let user = await User.findOne({ googleId });
+  let newAccount = false;
+  const location = locationFromRequest(req);
 
   if (!user) {
     // First time this Google identity has signed in here — check whether an
@@ -342,8 +365,13 @@ async function googleAuth(req, res) {
       username: payload.name || email.split('@')[0],
       email,
       googleId,
+      signupLocation: storedLocation(location),
     });
+    newAccount = true;
   }
+
+  // Every successful "Continue with Google", new account or returning.
+  await recordAuthEvent({ event: 'google_continue', userId: user._id, newAccount, location });
 
   const token = signToken(user._id);
   await issueDeviceSession(user._id, deviceId);
@@ -398,10 +426,11 @@ async function logout(req, res) {
 }
 
 async function me(req, res) {
-  const [user, membership, tierConfig] = await Promise.all([
+  const [user, membership, tierConfig, coinBalance] = await Promise.all([
     User.findById(req.userId).select(PUBLIC_USER_EXCLUDE).lean(),
     TierMembership.findOne({ user: req.userId }).select('tier').lean(),
     getTierConfig(),
+    getBalance(req.userId),
   ]);
   if (!user) {
     return res.status(404).json({ message: 'User not found' });
@@ -409,7 +438,8 @@ async function me(req, res) {
   // Infinite tier badge for the header. Read as stored (not settled) — the
   // tier only changes at the nightly reset, and /infinite/me settles fully.
   const tier = membership ? membership.tier : 8;
-  return res.json({ user: publicUser(user), infinite: { tier, tierName: tierDef(tierConfig, tier).name } });
+  // coinBalance feeds the header coin chip; GET /wallet has the same number.
+  return res.json({ user: publicUser(user), infinite: { tier, tierName: tierDef(tierConfig, tier).name }, coinBalance });
 }
 
 async function updateUsername(req, res) {

@@ -14,7 +14,7 @@ const { istDayKey } = require('./dailyWord');
 const { getWeekRange } = require('./leaderboard');
 
 // Versions that live on the user's SyncState document (bumped by bumpSync).
-const USER_KEYS = ['me', 'today', 'mine', 'infinite', 'tierChanges', 'notifications', 'rewards'];
+const USER_KEYS = ['me', 'today', 'mine', 'infinite', 'tierChanges', 'notifications', 'wallet'];
 // Versions shared by everyone, on the single SyncGlobal document (bumpGlobal).
 const GLOBAL_KEYS = ['daily', 'weekly', 'infiniteBoard'];
 const GLOBAL_ID = 'global';
@@ -30,14 +30,14 @@ const MINUTE_MS = 60 * 1000;
 //                (leaderboards change on every other player's game).
 // Any key the app last fetched more than MAX_AGE_MS ago is reported as
 // changed regardless: a safety net for data changed outside the code paths
-// that bump versions (manual DB fixes, payouts marked paid by hand).
+// that bump versions (manual DB fixes, coin adjustments by hand).
 const SYNC_KEYS = {
   me: {},
   mine: {},
   notifications: {},
   infinite: {},
   tierChanges: {},
-  rewards: {},
+  wallet: {},
   today: {},
   tiers: {},
   daily: { throttleMs: MINUTE_MS },
@@ -170,7 +170,7 @@ async function currentSyncValues(userId, config, now = Date.now()) {
     mine: u.mine,
     notifications: u.notifications,
     tierChanges: u.tierChanges,
-    rewards: u.rewards,
+    wallet: u.wallet,
     today: `${utcDay}:${u.today}`,
     infinite: `${istDay}:${u.infinite}`,
     tiers: `${config.version}:${configStamp}`,

@@ -73,9 +73,9 @@ function brandTilesHtml(word) {
     .join('');
 }
 
-// Shared layout for single-action emails (password reset, email
-// verification): brand tiles, a card with eyebrow/heading/intro, one
-// button, an expiry pill and a paste-able fallback link. All `p` fields are
+// Shared layout for single-action emails (password reset): brand tiles, a
+// card with eyebrow/heading/intro, one button, an expiry pill and a
+// paste-able fallback link. All `p` fields are
 // fixed server strings or server-built URLs, never user input.
 function actionEmailHtml(p) {
   return `<body style="margin:0;padding:0;background-color:#0F0B12;">
@@ -288,25 +288,79 @@ async function sendSignupVerificationEmail(toEmail, token, code, ttlMinutes) {
   });
 }
 
-// Link to the frontend's /verify-email/:token page, which calls
-// POST /api/verification/email/confirm with the token.
-async function sendEmailVerificationEmail(toEmail, token) {
-  const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email/${token}`;
+// Coin purchase receipt: brand tiles and one card with the order lines.
+// Every value is server-built (order id, numbers, dates), never user input.
+function formatInr(amountPaise) {
+  return `₹${(amountPaise / 100).toFixed(2)}`;
+}
 
+function coinReceiptHtml({ orderId, coins, amountPaise, paidAt, balance }) {
+  const row = (label, value) => `
+              <tr>
+                <td class="pad" style="padding:14px 40px 0 40px;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tbody><tr>
+                    <td style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#9A8AA2;line-height:22px;">${label}</td>
+                    <td align="right" style="font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:bold;color:#F3ECEF;line-height:22px;">${value}</td>
+                  </tr></tbody></table>
+                </td>
+              </tr>`;
+  const date = new Date(paidAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+
+  return `<body style="margin:0;padding:0;background-color:#0F0B12;">
+<span style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">${coins.toLocaleString('en-IN')} coins added to your GuessWord wallet.͏‌&nbsp;͏‌&nbsp;͏‌&nbsp;</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0F0B12" style="background-color:#0F0B12;">
+  <tbody><tr>
+    <td align="center" style="padding:40px 12px;">
+      <table role="presentation" class="wrap" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;">
+        <tbody><tr>
+          <td align="left" class="pad" style="padding:0 40px 24px 40px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tbody><tr>${brandTilesHtml('GUESSWORD')}</tr></tbody></table>
+          </td>
+        </tr>
+        <tr>
+          <td bgcolor="#1F1725" style="background-color:#1F1725;border:1px solid #33283A;border-radius:24px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tbody><tr>
+                <td class="pad" style="padding:44px 40px 0 40px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;color:#9A8AA2;line-height:18px;">Receipt</td>
+              </tr>
+              <tr>
+                <td class="pad h1" style="padding:12px 40px 0 40px;font-family:Arial,Helvetica,sans-serif;font-size:30px;color:#F3ECEF;line-height:36px;">${coins.toLocaleString('en-IN')} coins added.</td>
+              </tr>
+              <tr>
+                <td class="pad" style="padding:16px 40px 8px 40px;font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#C9BFCC;line-height:25px;">Thanks for your purchase. Your coins are in your wallet and ready to spend on hints.</td>
+              </tr>
+              ${row('Order', orderId)}
+              ${row('Date', date)}
+              ${row('Coins', coins.toLocaleString('en-IN'))}
+              ${row('Paid (incl. GST)', formatInr(amountPaise))}
+              ${row('New balance', `${balance.toLocaleString('en-IN')} coins`)}
+              <tr>
+                <td class="pad" style="padding:28px 40px 44px 40px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#9A8AA2;line-height:20px;">Coins have no cash value and can't be withdrawn or transferred. Purchases are non-refundable, except where required by law or for a duplicate charge. Questions? Reply to support@guessword.games with your order number.</td>
+              </tr>
+            </tbody></table>
+          </td>
+        </tr>
+      </tbody></table>
+    </td>
+  </tr>
+</tbody></table>
+</body>`;
+}
+
+async function sendCoinReceiptEmail(toEmail, receipt) {
   await getNoreplyTransporter().sendMail({
     from: NOREPLY_EMAIL_FROM,
     to: toEmail,
-    subject: 'Verify your GuessWord email',
-    html: actionEmailHtml({
-      preheader: 'Confirm this is your email address. This link expires in 24 hours.',
-      eyebrow: 'Email verification',
-      heading: 'Confirm your email address.',
-      intro: 'Click the link below to confirm this email address belongs to you. This link expires in 24 hours.',
-      buttonLabel: 'Verify my email',
-      url: verifyUrl,
-      expiryLabel: 'Expires in 24 hours',
-      ignoreNote: 'If you did not ask for this, you can safely ignore this email.',
-    }),
+    subject: `Your GuessWord receipt · ${receipt.orderId}`,
+    html: coinReceiptHtml(receipt),
+    text: [
+      `${receipt.coins} coins added to your GuessWord wallet.`,
+      `Order: ${receipt.orderId}`,
+      `Paid (incl. GST): ${formatInr(receipt.amountPaise)}`,
+      `New balance: ${receipt.balance} coins`,
+      '',
+      "Coins have no cash value and can't be withdrawn or transferred. Purchases are non-refundable, except where required by law or for a duplicate charge.",
+    ].join('\n'),
   });
 }
 
@@ -391,7 +445,7 @@ async function sendContactDigestEmail({ to, subject, rangeLabel, submissions }) 
 module.exports = {
   sendPasswordResetEmail,
   sendSignupVerificationEmail,
-  sendEmailVerificationEmail,
+  sendCoinReceiptEmail,
   sendContactNotificationEmail,
   sendContactDigestEmail,
 };

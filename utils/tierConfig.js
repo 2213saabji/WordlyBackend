@@ -1,18 +1,27 @@
 const TierConfig = require('../models/TierConfig');
 
-// Starting values from the PRD (Table 1 + §5.1 days to stick). A TierConfig
-// document overrides any of these without a release; see getTierConfig().
+// Starting values from the PRD (Table 1 + §5.1 days to stick; v0.2 coins,
+// paid hints, decay and the demotion penalty). A TierConfig document
+// overrides any of these without a release; see getTierConfig().
+//
+// hintCost: coins for the round's hint (the word's clue). 0 = free, and
+// the clue is in the game payload from the start (Tiers 7–8). Above 0, it's
+// only revealed through POST /game/infinite/hint (Tiers 1–6). null = hints
+// off in that tier (the v0.1 behaviour), for rolling paid hints out after
+// coin earning: set tiers 1–6 to null in TierConfig until the store opens.
+// cycleReward: what completing the tier's counter earns without moving up.
+// Only Diamond has one: a Diamond star per 30-day cycle (no cash).
 const DEFAULT_TIER_CONFIG = {
   version: 0,
   tiers: [
-    { tier: 1, name: 'Diamond', hintsEnabled: false, minActiveMinutes: 60, minGamesCompleted: 20, daysToStick: 30, rewardInr: 100 },
-    { tier: 2, name: 'Platinum', hintsEnabled: false, minActiveMinutes: 45, minGamesCompleted: 15, daysToStick: 30, rewardInr: 0 },
-    { tier: 3, name: 'Gold', hintsEnabled: false, minActiveMinutes: 35, minGamesCompleted: 12, daysToStick: 21, rewardInr: 0 },
-    { tier: 4, name: 'Silver', hintsEnabled: false, minActiveMinutes: 25, minGamesCompleted: 9, daysToStick: 14, rewardInr: 0 },
-    { tier: 5, name: 'Bronze', hintsEnabled: false, minActiveMinutes: 20, minGamesCompleted: 7, daysToStick: 10, rewardInr: 0 },
-    { tier: 6, name: 'Copper', hintsEnabled: false, minActiveMinutes: 15, minGamesCompleted: 5, daysToStick: 7, rewardInr: 0 },
-    { tier: 7, name: 'Iron', hintsEnabled: true, minActiveMinutes: 10, minGamesCompleted: 3, daysToStick: 5, rewardInr: 0 },
-    { tier: 8, name: 'Stone', hintsEnabled: true, minActiveMinutes: 0, minGamesCompleted: 0, daysToStick: 3, rewardInr: 0 },
+    { tier: 1, name: 'Diamond', hintCost: 1000, minActiveMinutes: 60, minGamesCompleted: 20, daysToStick: 30, cycleReward: 'star' },
+    { tier: 2, name: 'Platinum', hintCost: 1000, minActiveMinutes: 45, minGamesCompleted: 15, daysToStick: 30, cycleReward: null },
+    { tier: 3, name: 'Gold', hintCost: 1000, minActiveMinutes: 35, minGamesCompleted: 12, daysToStick: 21, cycleReward: null },
+    { tier: 4, name: 'Silver', hintCost: 1000, minActiveMinutes: 25, minGamesCompleted: 9, daysToStick: 14, cycleReward: null },
+    { tier: 5, name: 'Bronze', hintCost: 1000, minActiveMinutes: 20, minGamesCompleted: 7, daysToStick: 10, cycleReward: null },
+    { tier: 6, name: 'Copper', hintCost: 1000, minActiveMinutes: 15, minGamesCompleted: 5, daysToStick: 7, cycleReward: null },
+    { tier: 7, name: 'Iron', hintCost: 0, minActiveMinutes: 10, minGamesCompleted: 3, daysToStick: 5, cycleReward: null },
+    { tier: 8, name: 'Stone', hintCost: 0, minActiveMinutes: 0, minGamesCompleted: 0, daysToStick: 3, cycleReward: null },
   ],
   scoring: { solveBase: 10, perUnusedGuess: 2, lossPoints: 0, qualifyingDayBonus: 20 },
   // Demote at `misses` missed days in the tier's rolling window. Tiers up to
@@ -20,7 +29,23 @@ const DEFAULT_TIER_CONFIG = {
   // window: 3 misses in 30 days (Diamond, Platinum), 21 (Gold), 14 (Silver).
   // Tiers below use windowDays.
   demotion: { misses: 3, windowDays: 7, stickWindowMaxTier: 4 },
+  // Promotion and demotion both carry this share of the old tier's points
+  // into the new tier; demotion then takes demotionPenalty off (floor 0).
   carryInPercent: 20,
+  demotionPenalty: 50,
+  // Inactivity decay: each settled IST day with no completed Infinite game
+  // costs `rate` of the current tier points, at least `minPoints` (floor 0).
+  // Days before `effectiveFrom` are never decayed, so the first reset after
+  // release doesn't decay dormant players retroactively — set it to the
+  // release day.
+  decay: { rate: 0.05, minPoints: 10, effectiveFrom: '2026-10-03' },
+  // Coins: +solveReward per solved word (Daily and Infinite). Packs are what
+  // GET /store/coin-packs sells; price in paise, GST inclusive.
+  coins: {
+    solveReward: 10,
+    packs: [{ packId: 'coins_3000', coins: 3000, pricePaise: 1000, currency: 'INR' }],
+    orderExpiryMinutes: 30, // an unpaid order shows as expired after this
+  },
   activity: {
     heartbeatMinIntervalMs: 10000, // rate limit: beats closer than this earn nothing
     maxHeartbeatGapMs: 45000, // a longer gap (dropped beats, new session) earns nothing
@@ -34,9 +59,6 @@ const DEFAULT_TIER_CONFIG = {
   // Contract Q4 defaults, pending product sign-off.
   hideDifficultyInProgress: true,
   abandonAfterGuessIsLoss: true,
-  // Phase 1 ships with no reward: Tier 1's counter still cycles at 30, but no
-  // Payout is created until this is switched on (Phase 2).
-  rewardsEnabled: false,
 };
 
 const CACHE_TTL_MS = 60 * 1000;
@@ -54,6 +76,9 @@ function mergeConfig(doc) {
     scoring: { ...d.scoring, ...(doc.scoring || {}) },
     demotion: { ...d.demotion, ...(doc.demotion || {}) },
     activity: { ...d.activity, ...(doc.activity || {}) },
+    decay: { ...d.decay, ...(doc.decay || {}) },
+    // packs, if given, replace the default list as a whole.
+    coins: { ...d.coins, ...(doc.coins || {}) },
   };
 }
 
@@ -92,4 +117,15 @@ function dayTargets(config, tier) {
   };
 }
 
-module.exports = { DEFAULT_TIER_CONFIG, getTierConfig, tierDef, demotionRule, dayTargets };
+// Points lost to inactivity on one idle day, from the current tier points.
+function decayFor(config, score) {
+  if (score <= 0) return 0;
+  const { rate, minPoints } = config.decay;
+  return Math.min(score, Math.max(minPoints, Math.floor(score * rate)));
+}
+
+function coinPack(config, packId) {
+  return config.coins.packs.find((p) => p.packId === packId) || null;
+}
+
+module.exports = { DEFAULT_TIER_CONFIG, getTierConfig, tierDef, demotionRule, dayTargets, decayFor, coinPack };

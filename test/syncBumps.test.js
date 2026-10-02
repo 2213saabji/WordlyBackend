@@ -10,14 +10,14 @@ const TierMembership = require('../models/TierMembership');
 const InfiniteDay = require('../models/InfiniteDay');
 const TierChange = require('../models/TierChange');
 const Notification = require('../models/Notification');
-const Payout = require('../models/Payout');
-const ReviewCase = require('../models/ReviewCase');
 const Game = require('../models/Game');
 const User = require('../models/User');
+const TierConfig = require('../models/TierConfig');
 
 const { DEFAULT_TIER_CONFIG } = require('../utils/tierConfig');
 const { settleMembership, notify } = require('../utils/tiers');
-const { verificationChanged } = require('../utils/verification');
+const { awardSolveCoins } = require('../utils/wallet');
+const { stubCoins } = require('./helpers/coinStubs');
 const { markRead } = require('../controllers/notificationController');
 const { updateUsername } = require('../controllers/authController');
 const { submitGuess } = require('../controllers/gameController');
@@ -43,6 +43,8 @@ beforeEach(() => {
     return {};
   };
   Notification.create = async (doc) => ({ _id: 'n1', ...doc });
+  TierConfig.findOne = () => ({ sort: () => lean(null) }); // defaults
+  stubCoins();
 });
 
 function call(handler, { body = {}, params = {}, userId = USER } = {}) {
@@ -98,7 +100,7 @@ test('an invalid username bumps nothing', async () => {
 // --- daily game -------------------------------------------------------------
 
 function stubDailyGame(word) {
-  const game = { _id: 'g1', mode: 'daily', date: '2026-09-28', word, status: 'in-progress', guesses: [], createdAt: new Date(), save: async () => {} };
+  const game = { _id: 'g1', user: USER, mode: 'daily', date: '2026-09-28', word, status: 'in-progress', guesses: [], createdAt: new Date(), save: async () => {} };
   Game.findOne = async () => game;
   const user = { stats: { gamesPlayed: 0, gamesWon: 0, currentStreak: 0, maxStreak: 0, lastWinDate: null }, save: async () => {} };
   User.findById = async () => user;
@@ -113,12 +115,22 @@ test('a daily guess that does not finish the game bumps today only', async () =>
   assert.deepEqual(globalKeys(), [], 'boards only list finished games');
 });
 
-test('the guess that finishes the daily game bumps today, me (stats) and the daily/weekly boards', async () => {
+test('the guess that finishes the daily game bumps today, me (stats), wallet (+10 coins) and the daily/weekly boards', async () => {
   stubDailyGame('crane');
   const res = await call(submitGuess, { body: { guess: 'crane' } });
   assert.equal(res.body.game.status, 'won');
-  assert.deepEqual(keys().sort(), ['me', 'today']);
+  assert.deepEqual(res.body.coins, { awarded: 10, balance: 10 });
+  assert.deepEqual([...new Set(keys())].sort(), ['me', 'today', 'wallet']);
   assert.deepEqual(globalKeys(), ['daily', 'weekly']);
+});
+
+test('a lost daily game earns no coins and bumps no wallet', async () => {
+  const game = stubDailyGame('crane');
+  game.guesses = Array.from({ length: 5 }, () => ({ guess: 'slate', result: [0, 0, 0, 0, 0] }));
+  const res = await call(submitGuess, { body: { guess: 'slate' } });
+  assert.equal(res.body.game.status, 'lost');
+  assert.equal(res.body.coins.awarded, 0);
+  assert.ok(!keys().includes('wallet'));
 });
 
 test('an invalid daily guess bumps nothing', async () => {
@@ -127,11 +139,19 @@ test('an invalid daily guess bumps nothing', async () => {
   assert.deepEqual(keys(), []);
 });
 
-// --- verification / rewards -------------------------------------------------
+// --- wallet -------------------------------------------------------------------
 
-test('verificationChanged() bumps rewards and infinite (Tier 1 reward block)', async () => {
-  await verificationChanged(USER);
-  assert.deepEqual(keys().sort(), ['infinite', 'rewards']);
+test('a coin credit bumps wallet and me (the header coin chip)', async () => {
+  await awardSolveCoins({ _id: 'g9', user: USER, mode: 'infinite', status: 'won' }, config);
+  assert.deepEqual(keys().sort(), ['me', 'wallet']);
+});
+
+test('a repeat credit for the same game bumps nothing', async () => {
+  await awardSolveCoins({ _id: 'g9', user: USER, mode: 'infinite', status: 'won' }, config);
+  bumps = [];
+  const again = await awardSolveCoins({ _id: 'g9', user: USER, mode: 'infinite', status: 'won' }, config);
+  assert.equal(again.awarded, 0);
+  assert.deepEqual(keys(), []);
 });
 
 // --- nightly settle ---------------------------------------------------------
@@ -152,7 +172,6 @@ function stubSettle(membership, playedDays = {}) {
     select: () => lean(Object.entries(playedDays).map(([day, qualified]) => ({ day, qualified }))),
   });
   TierChange.create = async () => ({});
-  Payout.updateOne = async () => ({ upsertedCount: 1 });
   return () => doc;
 }
 
@@ -184,52 +203,34 @@ test('settle: a demotion also bumps me (tier badge), tierChanges and notificatio
   assert.equal(stats.demoted, 1);
   assert.equal(current().tier, 6);
   assert.deepEqual(keys().sort(), ['infinite', 'me', 'notifications', 'tierChanges']);
-  assert.ok(!keys().includes('rewards'), 'no Tier 1 involved');
   assert.deepEqual(globalKeys(), ['infiniteBoard'], 'moved between tier boards');
 });
 
-test('settle: any settled day in Tier 1 also bumps rewards (the tracker day count)', async () => {
+test('settle: a settled day in Tier 1 bumps infinite only (no reward tracker any more)', async () => {
   stubSettle(member({ tier: 1 }), { '2026-01-02': true });
   await settleMembership(member({ tier: 1 }), config, '2026-01-02');
-  assert.deepEqual(keys().sort(), ['infinite', 'rewards']);
+  assert.deepEqual(keys(), ['infinite']);
 });
 
-test('settle: promotion into Tier 1 bumps rewards', async () => {
+test('settle: promotion into Tier 1 bumps me, tierChanges, notifications and infinite', async () => {
   const start = member({ tier: 2, stickDays: config.tiers[1].daysToStick - 1 });
   stubSettle(start, { '2026-01-02': true });
   const { stats } = await settleMembership(start, config, '2026-01-02');
   assert.equal(stats.promoted, 1);
-  assert.ok(keys().includes('rewards'));
-  assert.ok(keys().includes('me') && keys().includes('tierChanges'));
+  assert.deepEqual([...new Set(keys())].sort(), ['infinite', 'me', 'notifications', 'tierChanges']);
 });
 
-test('settle: a completed Tier 1 cycle with rewards on bumps rewards and notifications', async () => {
+test('settle: a completed Diamond cycle earns a star and bumps infinite', async () => {
   const start = member({ tier: 1, stickDays: config.tiers[0].daysToStick - 1 });
-  stubSettle(start, { '2026-01-02': true });
-  const { stats } = await settleMembership(start, { ...config, rewardsEnabled: true }, '2026-01-02');
-  assert.equal(stats.payoutsCreated, 1);
-  assert.deepEqual([...new Set(keys())].sort(), ['infinite', 'notifications', 'rewards']);
+  const current = stubSettle(start, { '2026-01-02': true });
+  const { stats } = await settleMembership(start, config, '2026-01-02');
+  assert.equal(stats.starsEarned, 1);
+  assert.deepEqual(current().completedCycles, [{ cycle: 1, day: '2026-01-02' }]);
+  assert.deepEqual(keys(), ['infinite']);
 });
 
 test('settle: all bumps go to the settled player', async () => {
   stubSettle(member(), { '2026-01-02': true });
   await settleMembership(member(), config, '2026-01-02');
   assert.ok(bumps.every(([u]) => u === USER));
-});
-
-// --- review cases -----------------------------------------------------------
-
-test('opening a review case bumps rewards + infinite; an existing open case does not', async () => {
-  const { claimIdentity } = require('../utils/verification');
-  const IdentityClaim = require('../models/IdentityClaim');
-  IdentityClaim.findOne = () => lean({ user: '507f1f77bcf86cd799439099' }); // held by someone else
-
-  ReviewCase.updateOne = async () => ({ upsertedCount: 1 });
-  assert.equal(await claimIdentity(USER, 'phone', 'h1'), false);
-  assert.deepEqual(keys().sort(), ['infinite', 'rewards']);
-
-  bumps = [];
-  ReviewCase.updateOne = async () => ({ upsertedCount: 0 });
-  await claimIdentity(USER, 'phone', 'h1');
-  assert.deepEqual(keys(), []);
 });

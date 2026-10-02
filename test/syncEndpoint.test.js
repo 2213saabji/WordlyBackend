@@ -20,6 +20,7 @@ const TierMembership = require('../models/TierMembership');
 const { resetGlobalCache, SYNC_KEYS, MAX_AGE_MS } = require('../utils/sync');
 const { DEFAULT_TIER_CONFIG } = require('../utils/tierConfig');
 const { scoreFinishedGame } = require('../utils/tiers');
+const { stubCoins } = require('./helpers/coinStubs');
 
 const ME = '507f1f77bcf86cd7994390a1';
 const OTHER = '507f1f77bcf86cd7994390b2';
@@ -53,6 +54,7 @@ function stubModels() {
   SyncGlobal.findById = () => ({ select: () => lean(globalDoc) });
   SyncGlobal.updateOne = async (f, update) => { inc(globalDoc, update); return {}; };
   TierConfig.findOne = () => ({ sort: () => lean(null) }); // defaults
+  stubCoins();
 
   User.findByIdAndUpdate = (id, update) => {
     const result = { _id: id, username: update.username || 'Me', email: 'me@x.com', stats: {}, groups: [] };

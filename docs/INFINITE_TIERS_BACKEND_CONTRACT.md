@@ -2,6 +2,11 @@
 
 Draft v0.1 · 26 Sep 2026 · Based on PRD "Infinite Mode Tier Leaderboard" v0.1
 
+> **Partly superseded (2 Oct 2026)** by `docs/COINS_HINTS_CONTRACT.md` (PRD v0.2). These parts no longer apply: hints
+> blocked in Tiers 1–6 (they now cost coins), the Tier 1 ₹100 reward and payouts (§6; Diamond cycles now earn a star),
+> verification (§7.3), and the reward and verification parts of §2, §7.2 and §8. Also new in v0.2: inactivity decay, and a
+> 50-point penalty on the demotion carry-in. Everything else here still holds.
+
 This document defines the data model, rules engine, and HTTP contract for the tiered
 Infinite leaderboard, and lists every change needed to the existing backend. All paths
 are under `/api`, all authenticated routes use the existing `requireAuth` Bearer JWT,
