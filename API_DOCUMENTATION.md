@@ -530,36 +530,37 @@ Auth required. Tells the app which APIs have data that changed since the app las
 
 ---
 
-## 9. Signup location (analytics)
+## 9. Signup location
 
-On **email signup** and on **every "Continue with Google"** the server records the country and first-level region the request came from. Nothing is needed from the app.
+When an account is **created**, by email signup or by a first "Continue with Google", the server saves the country and first-level region the request came from on the user, as `user.signupLocation`. Logins (email, or Google for an existing account) don't write anything. Nothing is needed from the app.
 
-- **Where it comes from:** the geolocation headers Vercel's edge adds after looking up the client's IP (`x-vercel-ip-country`, `x-vercel-ip-country-region`). There's no IP database and no third-party lookup, and the IP itself is never stored. Behind Cloudflare, set `TRUST_CLOUDFLARE_GEO=true` to use its visitor-location headers instead. Locally there are no headers, so the location is `null`.
-- **What's stored:**
-  - `countryCode` (ISO 3166-1, `IN`)
-  - `regionCode` (the region part of ISO 3166-2, `RJ`)
-  - `region` (`Rajasthan`)
-  - `regionType`: the local term, e.g. India/USA/Brazil/Germany/Mexico `State`, Canada `Province`, Australia `State`, France `Region`, UK `Country` (England), Japan `Prefecture`, China `Province` / `Autonomous region`, UAE `Emirate`.
-
-  Region names are built in for those 12 countries (`utils/regions.js`). Other countries keep `regionCode` with `region: null`.
-- **On the account:** `user.signupLocation` is set once, when the account is created. Email signup uses the location of the signup form request, even if the emailed link is opened elsewhere.
-- **Events:** each email signup and each successful Google sign-in (new or returning) adds one `AuthEvent` row (`event`: `email_signup` | `google_continue`, `newAccount`).
-
-### `GET /analytics/auth-locations?from=2026-09-01&to=2026-10-02&event=all&newAccount=true`
-Server-to-server: `Authorization: Bearer $CRON_SECRET` (no user JWT).
-- `from` / `to` are IST days, inclusive. The default is the last 30.
-- `event`: `all` (default), `email_signup` or `google_continue`.
-- `newAccount=true` counts only new accounts.
 ```json
-{ "from": "2026-09-01", "to": "2026-10-02", "event": "all", "total": 15, "newAccounts": 12, "unknownLocation": 1,
-  "countries": [
-    { "countryCode": "IN", "country": "India", "regionTerm": "State", "count": 12, "newAccounts": 10,
-      "regions": [ { "regionCode": "MH", "region": "Maharashtra", "regionType": "State", "count": 7, "newAccounts": 7 },
-                   { "regionCode": "RJ", "region": "Rajasthan", "regionType": "State", "count": 5, "newAccounts": 3 } ] },
-    { "countryCode": "CA", "country": "Canada", "regionTerm": "Province", "count": 2, "newAccounts": 1,
-      "regions": [ { "regionCode": "ON", "region": "Ontario", "regionType": "Province", "count": 2, "newAccounts": 1 } ] } ] }
+"signupLocation": { "countryCode": "IN", "regionCode": "RJ", "region": "Rajasthan", "regionType": "State" }
 ```
-Sorted by count. `unknownLocation` counts events with no location. `400 INVALID_EVENT` / `INVALID_RANGE`.
+
+- **Where it comes from:** the geolocation headers Vercel's edge adds after looking up the client's IP (`x-vercel-ip-country`, `x-vercel-ip-country-region`). There's no IP database and no third-party lookup, and the IP itself is never stored. Behind Cloudflare, set `TRUST_CLOUDFLARE_GEO=true` to use its visitor-location headers instead. Locally there are no headers, so the value is `null`.
+- **Fields:**
+  - `countryCode`: ISO 3166-1, e.g. `IN`.
+  - `regionCode`: the region part of ISO 3166-2, e.g. `RJ`.
+  - `region`: e.g. `Rajasthan`.
+  - `regionType`: the local term. India, USA, Brazil, Germany, Mexico and Australia use `State`; Canada `Province`; France `Region`; UK `Country` (England); Japan `Prefecture`; China `Province` / `Autonomous region`; UAE `Emirate`.
+- **Coverage:** region names are built in for those 12 countries (`utils/regions.js`). Other countries keep `regionCode` with `region: null`.
+- **Email signup** uses the location of the signup form request, even if the emailed link is opened somewhere else.
+- **Linking Google** to an existing email account isn't a signup, so it adds no location.
+- **Accounts created before this** have `signupLocation: null`. Where they signed up is unknown, because IPs were never stored. `scripts/migrate-signup-location.js` sets the field explicitly on them, in place.
+
+### `GET /analytics/signup-locations?from=2026-09-01&to=2026-10-02`
+Server-to-server: `Authorization: Bearer $CRON_SECRET` (no user JWT). Counts new accounts by country, then region. `from` / `to` are IST days, inclusive; the default is the last 30.
+```json
+{ "from": "2026-09-01", "to": "2026-10-02", "total": 15, "unknownLocation": 1,
+  "countries": [
+    { "countryCode": "IN", "country": "India", "regionTerm": "State", "count": 12,
+      "regions": [ { "regionCode": "MH", "region": "Maharashtra", "regionType": "State", "count": 7 },
+                   { "regionCode": "RJ", "region": "Rajasthan", "regionType": "State", "count": 5 } ] },
+    { "countryCode": "CA", "country": "Canada", "regionTerm": "Province", "count": 2,
+      "regions": [ { "regionCode": "ON", "region": "Ontario", "regionType": "Province", "count": 2 } ] } ] }
+```
+Sorted by count. `unknownLocation` counts accounts with no location. `400 INVALID_RANGE` if `from` is after `to`.
 
 ---
 

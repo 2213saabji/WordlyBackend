@@ -10,8 +10,7 @@ const PendingSignup = require('../models/PendingSignup');
 const { sendPasswordResetEmail, sendSignupVerificationEmail } = require('../utils/email');
 const { getTierConfig, tierDef } = require('../utils/tierConfig');
 const { getBalance } = require('../utils/wallet');
-const { locationFromRequest } = require('../utils/geo');
-const { storedLocation, recordAuthEvent } = require('../utils/authAnalytics');
+const { locationFromRequest, storedLocation } = require('../utils/geo');
 const { bumpSync, bumpGlobal } = require('../utils/sync');
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -149,8 +148,6 @@ async function completeSignup(pendingId, deviceId, req, res) {
     }
     throw err;
   }
-
-  await recordAuthEvent({ event: 'email_signup', userId: user._id, newAccount: true, location: signupLocation });
 
   const token = signToken(user._id);
   await issueDeviceSession(user._id, deviceId);
@@ -346,8 +343,6 @@ async function googleAuth(req, res) {
   const googleId = payload.sub;
 
   let user = await User.findOne({ googleId });
-  let newAccount = false;
-  const location = locationFromRequest(req);
 
   if (!user) {
     // First time this Google identity has signed in here — check whether an
@@ -365,13 +360,11 @@ async function googleAuth(req, res) {
       username: payload.name || email.split('@')[0],
       email,
       googleId,
-      signupLocation: storedLocation(location),
+      // A Google sign-in with no account yet is the signup: record where
+      // it came from. Returning and linked accounts are left as they are.
+      signupLocation: storedLocation(locationFromRequest(req)),
     });
-    newAccount = true;
   }
-
-  // Every successful "Continue with Google", new account or returning.
-  await recordAuthEvent({ event: 'google_continue', userId: user._id, newAccount, location });
 
   const token = signToken(user._id);
   await issueDeviceSession(user._id, deviceId);

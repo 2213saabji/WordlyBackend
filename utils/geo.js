@@ -76,4 +76,12 @@ function locationFromRequest(req) {
   };
 }
 
-module.exports = { locationFromRequest, countryName };
+// The part of a location saved on the account (User.signupLocation):
+// country and region, without the lookup source.
+function storedLocation(location) {
+  if (!location || !location.countryCode) return null;
+  const { countryCode, regionCode, region, regionType } = location;
+  return { countryCode, regionCode: regionCode || null, region: region || null, regionType: regionType || null };
+}
+
+module.exports = { locationFromRequest, countryName, storedLocation };
